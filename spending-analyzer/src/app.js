@@ -113,8 +113,8 @@
   const today = new Date();
   const thisYM = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
   const todayStr = `${thisYM}-${String(today.getDate()).padStart(2, '0')}`;
-  const UI = { tab: 'dash', period: '12', from: '', to: '', drill: null, trendCat: '', applyTo: 'store',
-    table: { cat: '', sub: '', pay: '', src: '', q: '', uncat: false, showOff: true, sort: 'date', dir: -1, limit: 300 } };
+  const UI = { tab: 'dash', period: '12', from: '', to: '', drill: null, trendCat: '', applyTo: 'one',
+    table: { store: '', storeName: '', cat: '', sub: '', pay: '', src: '', q: '', uncat: false, showOff: true, sort: 'date', dir: -1, limit: 300 } };
   function range() {
     const p = UI.period;
     if (p === 'custom') return [UI.from || D.months[0], UI.to || D.months[D.months.length - 1]];
@@ -448,7 +448,7 @@
   }
   function viewTable() {
     const t = UI.table;
-    let list = D.items.filter(inRange);
+    let list = t.store ? D.items.filter((x) => x.c.key === t.store) : D.items.filter(inRange);
     if (t.cat) list = list.filter((x) => x.cat === t.cat);
     if (t.sub) list = list.filter((x) => x.sub === t.sub);
     if (t.pay) list = list.filter((x) => x.r.pay === t.pay);
@@ -466,7 +466,7 @@
       const ins = C.installment(x.r, today);
       return `<tr class="${x.amt === 0 ? 'off' : ''}" data-id="${esc(x.r.id)}">
         <td>${x.r.date}</td><td class="muted">${x.r.time || ''}</td>
-        <td>${esc(x.r.store)}${x.c.agent ? ' <span class="pill" title="결제대행사 이름이라 가게별로 기억하지 않아요">대행사</span>' : ''}${x.r.rawStore && x.r.rawStore !== x.r.store ? `<div class="muted" style="font-size:12px">${esc(x.r.rawStore)}</div>` : ''}</td>
+        <td><a href="#" class="estore" data-key="${esc(x.c.key)}" data-name="${esc(x.r.store)}" title="이 가게 내역 전부 보기">${esc(x.r.store)}</a>${x.c.agent ? ' <span class="pill" title="결제대행사 이름이라 가게별로 기억하지 않아요">대행사</span>' : ''}${x.r.rawStore && x.r.rawStore !== x.r.store ? `<div class="muted" style="font-size:12px">${esc(x.r.rawStore)}</div>` : ''}</td>
         <td class="num">${won(x.r.amount)}${ins ? `<div class="muted" style="font-size:12px">${ins.months}개월 · 월 ${won(ins.monthly)} · 남은 ${won(ins.leftAmount)} (${ins.left}회)</div>` : ''}</td>
         <td><select class="ecat">${catOptions(x.c.cat)}</select></td>
         <td><select class="esub">${subOptions(x.c.cat, x.c.sub)}</select></td>
@@ -485,15 +485,30 @@
         <label><input type="checkbox" id="funcat" ${t.uncat ? 'checked' : ''}> 분류 덜 된 것만</label>
         <label><input type="checkbox" id="foff" ${t.showOff ? 'checked' : ''}> 지출 아닌 것도 보기</label>
       </div>
+      ${t.store ? `<div class="filters"><span class="chip">가게: <b>${esc(t.storeName)}</b> · 전체 기간<button id="storeOff" title="가게 보기 끄기">×</button></span></div>` : ''}
       <div class="filters"><span>${list.length}건 · 지출 합계 <b>${won(total)}</b></span>
         <span class="muted" style="margin-left:auto">분류를 고치면</span>
-        <div class="seg" id="applyTo"><button data-v="store" class="${UI.applyTo === 'store' ? 'on' : ''}">같은 가게 전부</button><button data-v="one" class="${UI.applyTo === 'one' ? 'on' : ''}">이 건만</button></div></div>
+        <div class="seg" id="applyTo">${[['one', '이 건만'], ['memo', '같은 메모 전부'], ['store', '같은 가게 전부']].map(([v, l]) => `<button data-v="${v}" class="${UI.applyTo === v ? 'on' : ''}">${l}</button>`).join('')}</div></div>
       <div class="card tablewrap" style="padding:6px 8px"><table><thead><tr>${sortTh('date', '날짜')}<th>시각</th>${sortTh('store', '가게')}${sortTh('amount', '금액', 'num')}${sortTh('cat', '대분류')}<th>세부</th><th>결제</th><th>메모</th><th>출처</th><th></th></tr></thead><tbody>${rows}</tbody></table>
       ${list.length > t.limit ? `<p style="text-align:center"><button class="btn" id="more">${list.length - t.limit}건 더 보기</button></p>` : ''}</div>`;
   }
   function setClass(id, cat, sub, forceOne) {
     const x = D.items.find((i) => i.r.id === id); if (!x) return;
-    if (UI.applyTo === 'one' || x.c.agent || forceOne) {
+    if (UI.applyTo === 'memo' && !forceOne) {
+      // 같은 메모(상품명)는 단어 규칙으로: 앞으로 들어오는 내역에도, 가계부 앱에도 적용
+      const kw = C.productName(x.r.memo).trim().toLowerCase();
+      if (!kw) { toast('이 건은 메모가 없어서 이 건만 바꿨어요'); S.overrides[id] = { ...(S.overrides[id] || {}), cat, sub }; save(); recompute(); render(); return; }
+      S.rules = S.rules.filter((r) => r.kw !== kw); S.rules.push({ kw, cat, sub });
+      let n = 0;
+      D.items.forEach((i) => {
+        if (!C.matchRule(i.r, [{ kw }])) return;
+        n++;
+        const ov = S.overrides[i.r.id];
+        if (ov) { delete ov.cat; delete ov.sub; }
+        if (i.r.cat && i.r.cat !== cat) S.overrides[i.r.id] = { ...(ov || {}), cat };
+      });
+      toast(`메모에 '${kw.length > 30 ? kw.slice(0, 30) + '…' : kw}' 들어간 ${n}건에 적용했어요 (단어 규칙으로 저장)`);
+    } else if (UI.applyTo === 'one' || x.c.agent || forceOne) {
       S.overrides[id] = { ...(S.overrides[id] || {}), cat, sub };
       if (x.c.agent && UI.applyTo !== 'one') toast('결제대행사 이름이라 이 건만 바꿨어요');
     } else {
@@ -525,6 +540,8 @@
     on('#foff', 'onchange', (e) => { t.showOff = e.target.checked; render(); });
     on('#more', 'onclick', () => { t.limit += 500; render(); });
     root.querySelectorAll('#applyTo button').forEach((b) => b.onclick = () => { UI.applyTo = b.dataset.v; render(); });
+    root.querySelectorAll('.estore').forEach((a) => a.onclick = (e) => { e.preventDefault(); t.store = a.dataset.key; t.storeName = a.dataset.name; t.limit = 300; render(); scrollTo(0, 0); });
+    on('#storeOff', 'onclick', () => { t.store = ''; t.storeName = ''; render(); });
     root.querySelectorAll('th[data-sort]').forEach((th) => th.onclick = () => { if (t.sort === th.dataset.sort) t.dir *= -1; else { t.sort = th.dataset.sort; t.dir = th.dataset.sort === 'store' || th.dataset.sort === 'cat' ? 1 : -1; } render(); });
     root.querySelectorAll('tr[data-id]').forEach((tr) => {
       const id = tr.dataset.id;
