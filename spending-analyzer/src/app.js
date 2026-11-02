@@ -10,9 +10,13 @@
   const NOSUB = '(세부 없음)';
 
   // ---------- 저장 ----------
+  // 구글 앱스 스크립트 웹 앱으로 열면(GAS) 내역은 시트 '내역'에서 읽고, 분류는 시트 '분류 자료'에 저장한다.
+  // 파일로 열면 지금처럼 이 브라우저(localStorage)에 저장한다.
+  const GAS = typeof google !== 'undefined' && google.script && google.script.run ? google.script.run : null;
   const KEY = 'spending-analyzer.v1';
   const KEY_API = 'spending-analyzer.apikey';
   function load() {
+    if (GAS) return null;
     try { const s = JSON.parse(localStorage.getItem(KEY) || 'null'); if (s) return s; } catch (e) { /* 비어 있음 */ }
     return null;
   }
@@ -21,13 +25,59 @@
     dismissed: {}, opts: { excludeTransfer: false }, rules: [],
   }, load() || {});
   if (!Array.isArray(S.rules)) S.rules = [];
+  // GAS 상태: 시트에서 읽은 시각, 마지막으로 저장한 '분류 자료' 줄, 비밀번호·AI 키가 있는지
+  const G = { loaded: false, loading: false, at: null, meta: [], hasSync: false, hasAi: false, txCount: 0, saving: null, again: false };
+  function gasCall(fn, ...args) {
+    return new Promise((ok, no) => GAS.withSuccessHandler(ok).withFailureHandler((e) => no(new Error((e && e.message) || String(e))))[fn](...args));
+  }
   function save() {
+    if (GAS) { if (G.loaded) { clearTimeout(G.saveT); G.saveT = setTimeout(saveSheet, 500); } return; }
     try { localStorage.setItem(KEY, JSON.stringify(S)); }
     catch (e) { toast('브라우저 저장 공간이 부족해요. 설정에서 백업 파일을 내보내 두세요.'); }
   }
+  // 바뀐 줄만 시트에 보낸다. 보내는 중에 또 바뀌면 끝나고 한 번 더.
+  async function saveSheet() {
+    if (G.saving) { G.again = true; return; }
+    const next = C.stateToMeta(S);
+    const { puts, dels } = C.metaDiff(G.meta, next);
+    if (!puts.length && !dels.length) return;
+    G.saving = true;
+    try { await gasCall('saPutMeta', puts, dels); G.meta = next; }
+    catch (e) { toast(`시트에 저장하지 못했어요: ${e.message}`); }
+    G.saving = null;
+    if (G.again) { G.again = false; saveSheet(); }
+  }
+  async function loadSheet() {
+    G.loading = true; render();
+    try {
+      const d = await gasCall('saLoad');
+      const st = C.metaToState(d.meta);
+      const rows = C.parseAppRows([C.CSV_COLS].concat(d.tx));
+      Object.assign(S, { memory: st.memory, overrides: st.overrides, rules: st.rules, dismissed: st.dismissed,
+        tree: st.tree || S.tree, opts: st.opts || S.opts });
+      S.files = S.files.filter((f) => f.key !== 'app');
+      if (rows.rows.length) S.files.push({ key: 'app', kind: '구글 시트 내역', name: "시트 '내역'", label: C.rangeLabel(rows.rows), rows: rows.rows, problems: rows.problems, addedAt: Date.now() });
+      G.meta = C.stateToMeta(S); G.hasSync = d.hasSync; G.hasAi = d.hasAi; G.txCount = d.tx.length; G.at = new Date(); G.loaded = true;
+      // 처음 여는 시트면 기본 분류 목록·설정을 써 둔다
+      if (!d.meta.length) { G.meta = []; save(); }
+    } catch (e) { toast(`시트를 읽지 못했어요: ${e.message}`); }
+    G.loading = false; recompute(); render();
+  }
   function apiKey(v) {
+    if (GAS) return G.hasAi ? 'set' : '';
     try { if (v === undefined) return localStorage.getItem(KEY_API) || ''; if (v) localStorage.setItem(KEY_API, v); else localStorage.removeItem(KEY_API); } catch (e) { /* */ }
     return v;
+  }
+  async function callAI(prompt) {
+    if (GAS) return gasCall('saAi', prompt);
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-api-key': apiKey(), 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
+      body: JSON.stringify({ model: 'claude-haiku-5-5', max_tokens: 8000, messages: [{ role: 'user', content: prompt }] }),
+    });
+    const j = await res.json();
+    if (!res.ok) throw new Error((j.error && j.error.message) || res.status);
+    return j.content.map((c) => c.text || '').join('');
   }
 
   // ---------- 계산 ----------
@@ -356,7 +406,14 @@
       S.memory[x.c.key] = { cat, sub };
       // 가게 전체에 적용할 땐 그 가게의 건별 분류는 지운다
       let n = 0;
-      D.items.forEach((i) => { if (i.c.key === x.c.key) { n++; if (S.overrides[i.r.id]) { delete S.overrides[i.r.id].cat; delete S.overrides[i.r.id].sub; } } });
+      D.items.forEach((i) => {
+        if (i.c.key !== x.c.key || i.c.agent) return;
+        n++;
+        const ov = S.overrides[i.r.id];
+        if (ov) { delete ov.cat; delete ov.sub; }
+        // 가계부 앱이 정한 대분류가 다르면 건별로 바꿔 둔다 (시트를 거쳐 앱에도 반영)
+        if (i.r.cat && i.r.cat !== cat) S.overrides[i.r.id] = { ...(ov || {}), cat };
+      });
       if (n > 1) toast(`${x.r.store} ${n}건에 적용했어요`);
     }
     save(); recompute(); render();
@@ -536,14 +593,7 @@
     const list = todo.map((g, i) => `${i + 1}. ${g.store}${g.cat ? ` (대분류는 ${g.cat}로 정해짐)` : ''}`).join('\n');
     const prompt = `한국 카드 결제 내역의 가게 이름을 보고 지출 분류를 골라줘.\n\n분류 목록 (대분류: 세부들):\n${tree}\n\n가게 이름:\n${list}\n\n규칙: 반드시 위 목록 안에서만 고르고, 대분류가 정해진 가게는 그 대분류 안에서 세부만 골라. 이름만으로 확신이 없으면 cat을 빈 문자열로 둬. 결제대행사 이름(토스페이먼츠, 이니시스 등)만 있으면 빈 문자열.\nJSON 배열로만 답해: [{"n":번호,"cat":"대분류","sub":"세부"}]`;
     try {
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-api-key': apiKey(), 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
-        body: JSON.stringify({ model: 'claude-haiku-5-5', max_tokens: 8000, messages: [{ role: 'user', content: prompt }] }),
-      });
-      const j = await res.json();
-      if (!res.ok) throw new Error((j.error && j.error.message) || res.status);
-      const text = j.content.map((c) => c.text || '').join('');
+      const text = await callAI(prompt);
       const arr = JSON.parse(text.slice(text.indexOf('['), text.lastIndexOf(']') + 1));
       UI.ai = UI.ai || {};
       let n = 0;
@@ -605,7 +655,9 @@
   function viewFiles() {
     const files = S.files.slice().sort((a, b) => a.key.localeCompare(b.key));
     return `
-      <div class="card"><h2>파일 올리기</h2><p class="sub">가계부 앱이 구글 드라이브에 저장한 <b>가계부_내역_전체.csv</b>를 끌어다 놓으세요. 현대카드 명세서·실시간 이용내역(.xls), 네이버페이 내역 CSV도 읽어요. 같은 종류·같은 기간 파일을 다시 올리면 새 파일로 바뀌어요.</p>
+      ${GAS ? `<div class="card"><h2>구글 시트</h2><p class="sub">가계부 앱이 보낸 내역(시트 '내역')을 읽고, 분류는 시트 '분류 자료'에 바로 저장해요. 여기서 고친 대분류는 다음 동기화 때 앱에도 들어가요.</p>
+        <p>'내역' ${G.txCount.toLocaleString()}건${G.at ? ` · ${G.at.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}에 읽음` : ''} <button class="btn small" id="sheetReload">다시 읽기</button></p></div>` : ''}
+      <div class="card"><h2>${GAS ? '비교용 파일 올리기' : '파일 올리기'}</h2><p class="sub">${GAS ? '현대카드 명세서·실시간 이용내역(.xls), 네이버페이 내역 CSV를 올리면 시트 내역과 합쳐서 비교해요. 이 파일들은 시트에 저장하지 않아서 창을 닫으면 사라져요.' : '가계부 앱이 구글 드라이브에 저장한 <b>가계부_내역_전체.csv</b>를 끌어다 놓으세요. 현대카드 명세서·실시간 이용내역(.xls), 네이버페이 내역 CSV도 읽어요. 같은 종류·같은 기간 파일을 다시 올리면 새 파일로 바뀌어요.'}</p>
         <div class="drop" id="drop2">여기에 파일을 끌어다 놓거나 <button class="btn" id="pick2">파일 고르기</button></div></div>
       <div class="card"><h2>불러온 파일 · ${files.length}개</h2>
         ${files.length ? `<table><thead><tr><th>종류</th><th>기간</th><th class="num">건수</th><th>파일 이름</th><th></th></tr></thead><tbody>${files.map((f) => `<tr><td>${esc(f.kind)}</td><td>${esc(f.label)}</td><td class="num">${f.rows.length}</td><td class="muted">${esc(f.name)}</td><td><button class="btn small fdel" data-key="${esc(f.key)}">빼기</button></td></tr>`).join('')}</tbody></table>` : '<p class="muted">아직 없어요.</p>'}</div>
@@ -616,9 +668,11 @@
         <button class="btn" id="appOut" ${D && D.items.length ? '' : 'disabled'}>가계부 앱용 CSV 저장</button></div>
       <div class="card"><h2>백업</h2><p class="sub">분류 기억, 건별 분류, 세부 분류 목록을 파일로 저장해 다른 PC로 옮기거나 되살릴 수 있어요. 불러온 내역은 포함하지 않아요 (CSV를 다시 올리면 돼요). API 키도 넣지 않아요.</p>
         <button class="btn" id="bkOut">백업 파일 저장</button> <button class="btn" id="bkIn">백업 파일 불러오기</button></div>
-      <div class="card"><h2>AI 자동 분류</h2><p class="sub">Anthropic API 키를 넣으면 '분류하기'에서 AI 자동 분류 버튼을 쓸 수 있어요. 키는 이 PC의 브라우저에만 저장되고, AI에는 분류 안 된 가게 이름과 분류 목록만 보내요 (금액·날짜는 안 보내요).</p>
-        <input type="password" id="apikey" size="44" placeholder="sk-ant-..." value="${esc(apiKey())}"> <button class="btn" id="keySave">저장</button> <button class="btn" id="keyDel">지우기</button></div>
-      <div class="card"><h2>모두 지우기</h2><p class="sub">이 브라우저에 저장된 내역·분류를 모두 지워요. 먼저 백업 파일을 저장해 두세요.</p><button class="btn" id="wipe">모두 지우기</button></div>`;
+      ${GAS ? `<div class="card"><h2>가계부 앱 연결 비밀번호 ${G.hasSync ? '<span class="pill">정해짐</span>' : '<span class="pill warn">아직 없음</span>'}</h2><p class="sub">가계부 앱이 이 시트에 내역을 보낼 때 쓰는 비밀번호예요. 8자 이상으로 정하고, 앱 설정에도 똑같이 넣어 주세요. 다시 정하면 앱 쪽도 바꿔야 해요.</p>
+        <input type="password" id="synckey" size="30" placeholder="8자 이상"> <button class="btn" id="syncSave">${G.hasSync ? '바꾸기' : '정하기'}</button></div>` : ''}
+      <div class="card"><h2>AI 자동 분류 ${GAS && G.hasAi ? '<span class="pill">키 저장됨</span>' : ''}</h2><p class="sub">Anthropic API 키를 넣으면 '분류하기'에서 AI 자동 분류 버튼을 쓸 수 있어요. ${GAS ? '키는 이 시트의 앱스 스크립트 설정에 저장되고 화면에는 다시 보이지 않아요.' : '키는 이 PC의 브라우저에만 저장돼요.'} AI에는 분류 안 된 가게 이름과 분류 목록만 보내요 (금액·날짜는 안 보내요).</p>
+        <input type="password" id="apikey" size="44" placeholder="sk-ant-..." value="${GAS ? '' : esc(apiKey())}"> <button class="btn" id="keySave">저장</button> <button class="btn" id="keyDel">지우기</button></div>
+      ${GAS ? '' : `<div class="card"><h2>모두 지우기</h2><p class="sub">이 브라우저에 저장된 내역·분류를 모두 지워요. 먼저 백업 파일을 저장해 두세요.</p><button class="btn" id="wipe">모두 지우기</button></div>`}`;
   }
   function bindFiles(root) {
     setupDrop($('#drop2', root), $('#pick2', root));
@@ -634,7 +688,9 @@
       a.download = `가계부_가져오기_${todayStr}.csv`; a.click();
     };
     $('#bkOut', root).onclick = () => {
-      const data = { app: 'spending-analyzer', version: 1, savedAt: new Date().toISOString(), memory: S.memory, overrides: S.overrides, tree: S.tree, dismissed: S.dismissed, opts: S.opts, rules: S.rules };
+      const fp = {};
+      D.rows.forEach((r) => { if (S.overrides[r.id]) fp[r.id] = { date: r.date, time: r.time || '', amount: r.amount, store: r.store }; });
+      const data = { app: 'spending-analyzer', version: 1, savedAt: new Date().toISOString(), memory: S.memory, overrides: S.overrides, fingerprints: fp, tree: S.tree, dismissed: S.dismissed, opts: S.opts, rules: S.rules };
       const a = document.createElement('a');
       a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 1)], { type: 'application/json' }));
       a.download = `지출분석_백업_${todayStr}.json`; a.click();
@@ -643,13 +699,29 @@
       try {
         const d = JSON.parse(await fs[0].text());
         if (d.app !== 'spending-analyzer') throw new Error('지출 분석 백업 파일이 아니에요');
-        Object.assign(S, { memory: d.memory || {}, overrides: d.overrides || {}, tree: d.tree || S.tree, dismissed: d.dismissed || {}, opts: d.opts || S.opts, rules: d.rules || [] });
-        save(); recompute(); render(); toast('백업을 불러왔어요');
+        const m = C.remapOverrides(d.overrides || {}, d.fingerprints, D ? D.rows : []);
+        Object.assign(S, { memory: d.memory || {}, overrides: m.overrides, tree: d.tree || S.tree, dismissed: d.dismissed || {}, opts: d.opts || S.opts, rules: d.rules || [] });
+        save(); recompute(); render();
+        toast(`백업을 불러왔어요${m.moved ? ` · 건별 분류 ${m.moved}건을 지금 내역에 맞춰 옮김` : ''}${m.lost ? ` · ${m.lost}건은 맞는 내역을 못 찾음` : ''}`);
       } catch (e) { toast(`불러오지 못했어요: ${e.message}`); }
     });
-    $('#keySave', root).onclick = () => { apiKey($('#apikey').value.trim()); toast('키를 저장했어요'); };
-    $('#keyDel', root).onclick = () => { apiKey(''); render(); };
-    $('#wipe', root).onclick = () => { if (confirm('정말 모두 지울까요?')) { try { localStorage.removeItem(KEY); } catch (e) { /* */ } location.reload(); } };
+    $('#keySave', root).onclick = async () => {
+      const v = $('#apikey').value.trim();
+      if (!GAS) { apiKey(v); return toast('키를 저장했어요'); }
+      if (!v) return toast('키를 넣어 주세요');
+      try { await gasCall('saSetAiKey', v); G.hasAi = true; render(); toast('키를 저장했어요'); } catch (e) { toast(e.message); }
+    };
+    $('#keyDel', root).onclick = async () => {
+      if (!GAS) { apiKey(''); return render(); }
+      try { await gasCall('saSetAiKey', ''); G.hasAi = false; render(); } catch (e) { toast(e.message); }
+    };
+    const ss = $('#syncSave', root);
+    if (ss) ss.onclick = async () => {
+      try { await gasCall('saSetSyncKey', $('#synckey').value); G.hasSync = true; render(); toast('비밀번호를 정했어요. 가계부 앱 설정에도 같은 값을 넣어 주세요.'); } catch (e) { toast(e.message); }
+    };
+    const wp = $('#wipe', root);
+    if (wp) wp.onclick = () => { if (confirm('정말 모두 지울까요?')) { try { localStorage.removeItem(KEY); } catch (e) { /* */ } location.reload(); } };
+    const rl = $('#sheetReload', root); if (rl) rl.onclick = loadSheet;
   }
 
   // ---------- 파일 읽기 ----------
@@ -664,6 +736,7 @@
     for (const f of list) {
       try {
         const p = C.parseFile(f.name, await readText(f));
+        if (GAS && p.key === 'app') { msgs.push(`${f.name}: 가계부 내역은 구글 시트에서 읽어요`); continue; }
         S.files = S.files.filter((x) => x.key !== p.key);
         S.files.push({ key: p.key, kind: p.kind, name: f.name, label: p.label, rows: p.rows, problems: p.problems, addedAt: Date.now() });
         msgs.push(`${p.kind} ${p.rows.length}건`);
@@ -698,6 +771,19 @@
     }).join('');
     nav.querySelectorAll('button').forEach((b) => b.onclick = () => { UI.tab = b.dataset.tab; UI.drill = null; render(); });
     const main = $('main');
+    if (GAS && !G.loaded) {
+      main.innerHTML = `<div class="card empty"><h2>${G.loading ? '구글 시트를 읽는 중이에요…' : '구글 시트를 읽지 못했어요'}</h2>${G.loading ? '' : '<p><button class="btn primary" id="retry">다시 읽기</button></p>'}</div>`;
+      const rt = $('#retry'); if (rt) rt.onclick = loadSheet;
+      return;
+    }
+    if (GAS && !D.items.length && UI.tab !== 'files') {
+      main.innerHTML = `<div class="card empty"><h2>시트 '내역'이 아직 비어 있어요</h2>
+        <p>가계부 앱 설정에서 이 웹 앱 주소와 연결 비밀번호를 넣고 동기화하면 여기에 내역이 보여요.<br>비밀번호는 <b>파일·설정</b> 탭에서 정해요.</p>
+        <p><button class="btn" id="goFiles">파일·설정으로</button> <button class="btn" id="retry">다시 읽기</button></p></div>`;
+      $('#goFiles').onclick = () => { UI.tab = 'files'; render(); };
+      $('#retry').onclick = loadSheet;
+      return;
+    }
     if (!D.items.length && UI.tab !== 'files') {
       main.innerHTML = `<div class="card empty"><h2>지출 내역 파일을 올려주세요</h2>
         <p>가계부 앱이 구글 드라이브에 저장한 <b>가계부_내역_전체.csv</b>를 이 창에 끌어다 놓으면 돼요.<br>현대카드 명세서·실시간 이용내역(.xls)과 네이버페이 내역 CSV도 읽어요.</p>
@@ -713,6 +799,6 @@
   }
 
   recompute();
-  render();
-  window.__SA = { S, UI, get D() { return D; }, addFiles, render };
+  if (GAS) loadSheet(); else render();
+  window.__SA = { S, UI, G, get D() { return D; }, addFiles, render, loadSheet };
 })();

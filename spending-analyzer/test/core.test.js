@@ -112,3 +112,43 @@ test('가계부 앱용 CSV: 합친 건은 한 줄, 원래가게명은 카드 쪽
   const back = C.parseAppCSV(out.replace(/^﻿/, '')).rows;
   assert.equal(back[0].amount, 15000); assert.equal(back[1].include, false);
 });
+
+test('분류 자료 시트: 상태 ↔ 줄, 바뀐 줄만, 앱이 쓴 건별 줄 읽기', () => {
+  const st = {
+    overrides: { a1: { cat: '여가', sub: '굿즈' }, a2: { exclude: true }, a3: {} },
+    memory: { 스타벅스: { cat: '카페·간식', sub: '카페' } },
+    rules: [{ kw: '달빛', cat: '여가', sub: '게임' }],
+    tree: { 식비: ['식사'], 여가: ['게임', '굿즈'] },
+    opts: { excludeTransfer: true }, dismissed: { 'x|y': 1 },
+  };
+  const rows = C.stateToMeta(st);
+  assert.equal(rows.filter((r) => r[0] === '건별').length, 2); // 빈 건별은 안 씀
+  const back = C.metaToState(rows.concat([['건별', '777', '식비', '', '']])); // 앱이 추가한 줄
+  assert.deepEqual(back.overrides.a1, { cat: '여가', sub: '굿즈' });
+  assert.deepEqual(back.overrides.a2, { exclude: true });
+  assert.deepEqual(back.overrides['777'], { cat: '식비' });
+  assert.deepEqual(Object.keys(back.tree), ['식비', '여가']);
+  assert.deepEqual(back.rules, st.rules);
+  assert.deepEqual(back.opts, st.opts);
+  assert.deepEqual(back.dismissed, st.dismissed);
+  const next = C.stateToMeta({ ...st, overrides: { a1: { cat: '쇼핑', sub: '' } } });
+  const d = C.metaDiff(rows, next);
+  assert.deepEqual(d.puts, [['건별', 'a1', '쇼핑', '', '']]);
+  assert.deepEqual(d.dels, [['건별', 'a2']]);
+});
+
+test('백업의 건별 분류를 새 id로 옮기기 (날짜·시각·금액·가게)', () => {
+  const rows = [
+    { id: '101', date: '2026-10-01', amount: 5000, store: '윗치폼' },
+    { id: '102', date: '2026-10-02', amount: 4900, store: 'CHZZK' },
+    { id: '103', date: '2026-10-02', amount: 4900, store: 'CHZZK' },
+  ];
+  const m = C.remapOverrides(
+    { 'naverpay-1': { cat: '여가', sub: '굿즈' }, 'naverpay-2': { cat: '여가' }, '101x': { cat: '식비' } },
+    { 'naverpay-1': { date: '2026-10-01', amount: 5000, store: '윗치폼' }, 'naverpay-2': { date: '2026-10-02', amount: 4900, store: 'CHZZK' } },
+    rows);
+  assert.deepEqual(m.overrides['101'], { cat: '여가', sub: '굿즈' });
+  assert.deepEqual(m.overrides['102'], { cat: '여가' }); // 똑같은 두 건 중 첫 건으로
+  assert.equal(m.moved, 2);
+  assert.equal(m.lost, 1); // 지문 없는 건은 그대로 둔다
+});

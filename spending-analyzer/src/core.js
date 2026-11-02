@@ -109,8 +109,10 @@
     const n = parseInt(String(s || '').replace(/[,\s원]/g, ''), 10);
     return Number.isFinite(n) ? n : null;
   }
-  function parseAppCSV(text) {
-    const rows = parseCSV(text);
+  function parseAppCSV(text) { return parseAppRows(parseCSV(text)); }
+  /** 첫 줄이 열 이름인 2차원 배열 (CSV 또는 구글 시트 '내역') */
+  function parseAppRows(rows) {
+    rows = rows.map((r) => r.map((v) => String(v == null ? '' : v)));
     if (!rows.length) throw new Error('빈 파일이에요');
     const head = rows[0].map((h) => h.trim());
     const idx = {};
@@ -524,6 +526,76 @@
     return items;
   }
 
+  // ---------- 구글 시트 '분류 자료' (종류, 키, 대분류, 소분류, 값) ----------
+  // 건별 = 앱 id별 분류 (앱도 대분류를 읽고 씀), 가게 = 가게별 기억, 규칙 = 단어 규칙,
+  // 분류목록 = 대분류별 세부 목록, 설정 = 계산 옵션, 숨김 = 점검에서 '중복 아님'으로 넘긴 것
+  const META_HEADER = ['종류', '키', '대분류', '소분류', '값'];
+  function stateToMeta(st) {
+    const out = [];
+    for (const [id, ov] of Object.entries(st.overrides || {})) {
+      const extra = {};
+      if (ov.exclude) extra.exclude = true;
+      if (ov.include) extra.include = true;
+      if (!ov.cat && !ov.sub && !Object.keys(extra).length) continue;
+      out.push(['건별', id, ov.cat || '', ov.sub || '', Object.keys(extra).length ? JSON.stringify(extra) : '']);
+    }
+    for (const [k, m] of Object.entries(st.memory || {})) out.push(['가게', k, m.cat || '', m.sub || '', '']);
+    for (const r of st.rules || []) out.push(['규칙', r.kw, r.cat || '', r.sub || '', '']);
+    Object.entries(st.tree || {}).forEach(([cat, subs], i) => out.push(['분류목록', cat, '', '', JSON.stringify({ i, subs })]));
+    out.push(['설정', 'opts', '', '', JSON.stringify(st.opts || {})]);
+    for (const k of Object.keys(st.dismissed || {})) out.push(['숨김', k, '', '', '1']);
+    return out;
+  }
+  function metaToState(rows) {
+    const st = { overrides: {}, memory: {}, rules: [], tree: null, opts: null, dismissed: {} };
+    const tree = [];
+    const json = (v) => { try { return v ? JSON.parse(v) : {}; } catch (e) { return {}; } };
+    for (const r of rows || []) {
+      const [kind, key, cat, sub, val] = r.map((v) => String(v == null ? '' : v));
+      if (!key) continue;
+      if (kind === '건별') {
+        const ov = { ...json(val) };
+        if (cat) ov.cat = cat;
+        if (sub) ov.sub = sub;
+        if (Object.keys(ov).length) st.overrides[key] = ov;
+      } else if (kind === '가게') st.memory[key] = { cat, sub };
+      else if (kind === '규칙') st.rules.push({ kw: key, cat, sub });
+      else if (kind === '분류목록') { const j = json(val); tree.push([j.i == null ? 999 : j.i, key, Array.isArray(j.subs) ? j.subs : []]); }
+      else if (kind === '설정' && key === 'opts') st.opts = json(val);
+      else if (kind === '숨김') st.dismissed[key] = 1;
+    }
+    if (tree.length) st.tree = Object.fromEntries(tree.sort((a, b) => a[0] - b[0]).map((t) => [t[1], t[2]]));
+    return st;
+  }
+  /** 이전에 저장한 줄과 비교해 바뀐 줄(puts)과 없어진 키(dels)만 */
+  function metaDiff(prev, next) {
+    const k = (r) => `${r[0]}\t${r[1]}`;
+    const before = new Map(prev.map((r) => [k(r), JSON.stringify(r)]));
+    const after = new Set(next.map(k));
+    return {
+      puts: next.filter((r) => before.get(k(r)) !== JSON.stringify(r)),
+      dels: prev.filter((r) => !after.has(k(r))).map((r) => [r[0], r[1]]),
+    };
+  }
+  /** 백업의 건별 분류 id가 지금 내역에 없으면 날짜·금액·가게로 찾아 옮긴다 (가계부 앱으로 옮겨 id가 바뀐 경우) */
+  function remapOverrides(overrides, fingerprints, rows) {
+    const ids = new Set(rows.map((r) => r.id));
+    // 시각까지 맞는 건 먼저, 없으면 날짜·금액·가게. 똑같은 건이 여러 개면 순서대로 하나씩 (구별할 수 없는 건이라 결과는 같다)
+    const keys = (f) => [`${f.date}|${f.time || ''}|${f.amount}|${storeKey(f.store)}`, `${f.date}|${f.amount}|${storeKey(f.store)}`];
+    const idx = [new Map(), new Map()];
+    for (const r of rows) keys(r).forEach((k, i) => { if (!idx[i].has(k)) idx[i].set(k, []); idx[i].get(k).push(r.id); });
+    const out = {}; let moved = 0, lost = 0;
+    for (const id of Object.keys(overrides || {})) if (ids.has(id)) out[id] = overrides[id];
+    for (const [id, ov] of Object.entries(overrides || {})) {
+      if (ids.has(id)) continue;
+      const f = fingerprints && fingerprints[id];
+      let to = null;
+      if (f) for (const [i, k] of keys(f).entries()) { to = (idx[i].get(k) || []).find((x) => !(x in out)); if (to) break; }
+      if (to) { out[to] = ov; moved++; } else { out[id] = ov; lost++; }
+    }
+    return { overrides: out, moved, lost };
+  }
+
   // ---------- 가계부 앱용 CSV 내보내기 ----------
   /** 앱 CSV와 같은 14열. 출처·결제수단은 앱 라벨로, 원래가게명은 카드 쪽 이름 (앱이 나중에 카드 파일과 중복 거를 때 씀) */
   function appSource(r) {
@@ -553,9 +625,10 @@
   const api = {
     DEFAULT_TREE, NOT_SPENDING_CATS, WEEKDAYS,
     displayName, storeKey, isAgentOnly, similarStore, productName, sellerFromMemo, matchRule,
-    parseCSV, parseAppCSV, parseFile, parseHyundaiStatement, parseHyundaiRealtime, htmlRows,
+    CSV_COLS, parseCSV, parseAppCSV, parseAppRows, rangeLabel, parseFile, parseHyundaiStatement, parseHyundaiRealtime, htmlRows,
     combine, classify, spendAmount, installment, analyze, findRecurring, findDuplicates,
     dayNum, weekday, addMonths, group, sum, median, toAppCSV,
+    META_HEADER, stateToMeta, metaToState, metaDiff, remapOverrides,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Core = api;
