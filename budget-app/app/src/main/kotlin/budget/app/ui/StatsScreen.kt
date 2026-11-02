@@ -36,7 +36,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import budget.app.data.Prefs
-import budget.core.Stats
+import budget.app.data.Summary
 import java.time.YearMonth
 
 @Composable
@@ -44,14 +44,11 @@ fun StatsScreen() {
     val ctx = LocalContext.current
     val prefs = Prefs(ctx)
     var ym by remember { mutableStateOf(YearMonth.now()) }
-    val txs = rememberData(ym) { repo ->
-        repo.between(ym.minusMonths(5).atDay(1).atStartOfDay(), ym.plusMonths(1).atDay(1).atStartOfDay())
-    } ?: return
-    val stats = Stats(txs, prefs.includeTransfers)
+    val stats = rememberData(ym) { repo -> Summary.stats(repo, prefs, ym.minusMonths(5), ym) } ?: return
     val cats = stats.byCategory(ym)
     val total = cats.sumOf { it.second }
     val months = stats.monthly(ym, 6)
-    val budget = prefs.monthlyBudget
+    val budget = Summary.budget(prefs, stats, ym)
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {

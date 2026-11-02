@@ -126,7 +126,7 @@ details summary { cursor: pointer; font-weight: 600; margin: 4px 0; }
     '기타': ['선물·경조사', '기타'],
   };
   // 지출이 아닌 돈의 이동 (가계부 앱과 같은 값)
-  const NOT_SPENDING_CATS = ['카드대금', '현금인출', '입금'];
+  const NOT_SPENDING_CATS = ['카드대금', '현금인출', '입금', '수입', '돌려받은 돈', '내 계좌 이동', '저축'];
 
   // ---------- 가게 이름 (가계부 앱 Merchants.kt 와 같은 규칙) ----------
   const PAYMENT_AGENTS = [
@@ -214,6 +214,8 @@ details summary { cursor: pointer; font-weight: 600; margin: 4px 0; }
     row.push(f); if (row.some((x) => x !== '')) rows.push(row);
     return rows;
   }
+  // 수입 기록 뒤로 붙은 열 (없으면 빈칸): 종류 = 결제/환불/출금/입금, 상계대상 = 연결된 결제 id, 귀속월 = YYYY-MM
+  const EXTRA_COLS = ['종류', '상계대상', '귀속월'];
   const CSV_COLS = ['id', '날짜', '시각', '금액', '가게명', '원래가게명', '카테고리', '결제수단', '할부', '송금여부', '지출포함여부', '취소됨', '메모', '출처'];
   function toInt(s) {
     const n = parseInt(String(s || '').replace(/[,\s원]/g, ''), 10);
@@ -226,7 +228,7 @@ details summary { cursor: pointer; font-weight: 600; margin: 4px 0; }
     if (!rows.length) throw new Error('빈 파일이에요');
     const head = rows[0].map((h) => h.trim());
     const idx = {};
-    CSV_COLS.forEach((c) => { idx[c] = head.indexOf(c); });
+    CSV_COLS.concat(EXTRA_COLS).forEach((c) => { idx[c] = head.indexOf(c); });
     if (idx['날짜'] < 0 || idx['금액'] < 0) throw new Error('가계부 CSV 형식이 아니에요 (날짜·금액 열이 없음)');
     const get = (r, c) => (idx[c] >= 0 ? (r[idx[c]] || '').trim() : '');
     const out = [];
@@ -254,6 +256,7 @@ details summary { cursor: pointer; font-weight: 600; margin: 4px 0; }
         canceled: get(r, '취소됨') === 'Y',
         memo: get(r, '메모'),
         source: get(r, '출처') || 'CSV',
+        kind: get(r, '종류'), offsetTo: get(r, '상계대상'), incomeYM: get(r, '귀속월'),
       });
     });
     return { rows: out, problems };
@@ -509,6 +512,8 @@ details summary { cursor: pointer; font-weight: 600; margin: 4px 0; }
         report.refundOfCanceled.push({ date: r.date, store: r.store, amount: r.amount });
       }
     }
+    // 5) 상계: 환불·입금이 가리키는 결제는 그만큼 줄여서 센다 (행은 그대로 둔다)
+    applyOffsets(rows);
     rows.sort((a, b) => (a.date + (a.time || '')).localeCompare(b.date + (b.time || '')));
     return { rows, report };
   }
@@ -541,11 +546,25 @@ details summary { cursor: pointer; font-weight: 600; margin: 4px 0; }
   }
 
   /** 합계에 넣을 금액. 취소·지출 아님·지출 제외는 0. 송금 제외 옵션. */
+  function applyOffsets(rows) {
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    for (const r of rows) delete r.offset;
+    for (const r of rows) {
+      if (!r.offsetTo || r.canceled) continue;
+      const t = byId.get(r.offsetTo);
+      if (t) t.offset = (t.offset || 0) + Math.abs(r.amount);
+    }
+  }
+  /** 상계를 뺀 결제 금액 (0 아래로 안 내려감) */
+  function netAmount(r) {
+    return r.amount > 0 && r.offset ? Math.max(0, r.amount - r.offset) : r.amount;
+  }
   function spendAmount(r, opts) {
     if (r.canceled || !r.include) return 0;
+    if (r.offsetTo) return 0; // 결제에 연결된 환불·입금은 결제 쪽에서 이미 뺐다
     if (NOT_SPENDING_CATS.includes(r.cat)) return 0;
     if (opts && opts.excludeTransfer && (r.transfer || r.cat === '송금')) return 0;
-    return r.amount;
+    return netAmount(r);
   }
 
   // ---------- 할부 ----------
@@ -706,6 +725,23 @@ details summary { cursor: pointer; font-weight: 600; margin: 4px 0; }
     return { overrides: out, moved, lost };
   }
 
+  // ---------- 수입·저축 ----------
+  /** 달별 수입(귀속월 기준)·저축(실제 달). start = 수입이 처음 기록된 달 */
+  function monthFlow(rows) {
+    const m = {};
+    const at = (ym) => (m[ym] = m[ym] || { income: 0, saving: 0 });
+    let start = '';
+    for (const r of rows) {
+      if (r.canceled) continue;
+      if (r.cat === '수입') {
+        const ym = /^\d{4}-\d{2}$/.test(r.incomeYM || '') ? r.incomeYM : r.date.slice(0, 7);
+        at(ym).income += Math.abs(r.amount);
+        if (!start || ym < start) start = ym;
+      } else if (r.cat === '저축') at(r.date.slice(0, 7)).saving += Math.abs(r.amount);
+    }
+    return { byMonth: m, start };
+  }
+
   // ---------- 가계부 앱용 CSV 내보내기 ----------
   /** 앱 CSV와 같은 14열. 출처·결제수단은 앱 라벨로, 원래가게명은 카드 쪽 이름 (앱이 나중에 카드 파일과 중복 거를 때 씀) */
   function appSource(r) {
@@ -735,8 +771,8 @@ details summary { cursor: pointer; font-weight: 600; margin: 4px 0; }
   const api = {
     DEFAULT_TREE, NOT_SPENDING_CATS, WEEKDAYS,
     displayName, storeKey, isAgentOnly, similarStore, productName, sellerFromMemo, matchRule,
-    CSV_COLS, parseCSV, parseAppCSV, parseAppRows, rangeLabel, parseFile, parseHyundaiStatement, parseHyundaiRealtime, htmlRows,
-    combine, classify, spendAmount, installment, analyze, findRecurring, findDuplicates,
+    CSV_COLS, EXTRA_COLS, parseCSV, parseAppCSV, parseAppRows, rangeLabel, parseFile, parseHyundaiStatement, parseHyundaiRealtime, htmlRows,
+    combine, classify, spendAmount, netAmount, applyOffsets, monthFlow, installment, analyze, findRecurring, findDuplicates,
     dayNum, weekday, addMonths, group, sum, median, toAppCSV,
     META_HEADER, stateToMeta, metaToState, metaDiff, remapOverrides,
   };
@@ -837,7 +873,7 @@ details summary { cursor: pointer; font-weight: 600; margin: 4px 0; }
       const rr = { ...r, cat: c.cat };
       let amt = C.spendAmount(rr, S.opts);
       if (ov.exclude) amt = 0;
-      if (ov.include && !r.canceled && r.amount > 0) amt = r.amount;
+      if (ov.include && !r.canceled && r.amount > 0 && !r.offsetTo) amt = C.netAmount(r);
       return { r, c, amt, cat: c.cat || UNCAT, sub: c.sub || NOSUB, ym: r.date.slice(0, 7) };
     });
     const months = [...new Set(items.map((x) => x.ym))].sort();
@@ -958,6 +994,94 @@ details summary { cursor: pointer; font-weight: 600; margin: 4px 0; }
       <div class="val">${r.valText || won(r.value)}</div><div class="pct">${r.sub || ''}</div></div>`).join('');
   }
 
+  // ---------- 수입·저축·남은 돈 ----------
+  const FLOW = { income: ['수입', 'var(--s3)'], saving: ['저축', 'var(--s1)'], spend: ['지출', 'var(--s2)'] };
+  function groupedColumns(months, keys, val, note) {
+    const W = 760, H = 250, L = 46, B = 26, T = 22;
+    const max = Math.max(1, ...months.flatMap((m) => keys.map((k) => val(k, m) || 0)));
+    const step = niceStep(max / 4); const top = Math.ceil(max / step) * step;
+    const y = (v) => T + (H - T - B) * (1 - v / top);
+    const slot = (W - L) / months.length;
+    const bw = Math.min(16, (slot * 0.7) / keys.length);
+    let g = '';
+    for (let v = 0; v <= top + 1; v += step) g += `<line class="grid" x1="${L}" x2="${W}" y1="${y(v)}" y2="${y(v)}"/><text x="${L - 6}" y="${y(v) + 4}" text-anchor="end">${man(v)}</text>`;
+    months.forEach((m, i) => {
+      const cx = L + slot * (i + 0.5);
+      const ks = keys.filter((k) => val(k, m) != null);
+      ks.forEach((k, j) => {
+        const v = Math.max(0, val(k, m)); const x = cx - (ks.length * bw) / 2 + j * bw;
+        const tipH = `<b>${m}</b><br>${FLOW[k][0]}: <b>${won(v)}</b>${note(m) ? `<br>${note(m).tip}` : ''}`;
+        if (v > 0) g += `<path d="${roundTop(x + 1, y(v), bw - 2, y(0) - y(v))}" fill="${FLOW[k][1]}" data-tip="${esc(tipH)}"/>`;
+      });
+      const n = note(m);
+      if (n) g += `<text x="${cx}" y="${T - 8}" text-anchor="middle" style="fill:${n.v < 0 ? 'var(--bad)' : 'var(--good)'};font-weight:600">${n.v < 0 ? '−' : '+'}${man(Math.abs(n.v))}</text>`;
+      const lbl = months.length > 14 ? (i % 2 ? '' : m.slice(2).replace('-', '.')) : m.slice(2).replace('-', '.');
+      g += `<text x="${cx}" y="${H - 8}" text-anchor="middle">${lbl}</text>`;
+    });
+    return `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="월별 수입·저축·지출">${g}</svg>`;
+  }
+  function flowCards(months, recurring) {
+    const flow = C.monthFlow(D.rows);
+    if (!flow.start) {
+      return `<div class="card"><h2>수입 · 저축 · 남은 돈</h2><p class="muted" style="margin:0">아직 수입 기록이 없어요. 가계부 앱에서 입금을 '수입'으로, 적금을 '저축'으로 고르면 여기 달마다 쓸 수 있는 돈과 남은 돈이 나와요.</p></div>`;
+    }
+    const spendOf = (m) => C.sum(D.items.filter((x) => x.ym === m).map((x) => x.amt));
+    const fixedIds = new Set(recurring.flatMap((f) => f.ids));
+    const fixedOf = (m) => C.sum(D.items.filter((x) => x.ym === m && x.amt > 0 && fixedIds.has(x.r.id)).map((x) => x.amt));
+    const rec = (m) => {
+      const f = flow.byMonth[m] || { income: 0, saving: 0 };
+      const has = m >= flow.start;
+      const spend = spendOf(m);
+      const avail = f.income - f.saving;
+      return { m, has, income: f.income, saving: f.saving, spend, avail, left: avail - spend, fixed: fixedOf(m), rate: f.income ? f.saving / f.income : 0, now: m === thisYM };
+    };
+    const all = months.map(rec);
+    const withIncome = all.filter((o) => o.has);
+    // 1) 월별 막대
+    const chart = groupedColumns(months, ['income', 'saving', 'spend'], (k, m) => {
+      const o = all.find((x) => x.m === m);
+      if (k !== 'spend' && !o.has) return null;
+      return o[k];
+    }, (m) => { const o = all.find((x) => x.m === m); return o.has ? { v: o.left, tip: `남은 돈 <b>${won(o.left)}</b>${o.now ? ' (진행 중)' : ''}` } : null; });
+    const legend = ['income', 'saving', 'spend'].map((k) => `<span><i class="dot" style="background:${FLOW[k][1]}"></i>${FLOW[k][0]}</span>`).join('') + '<span>막대 위 숫자 = 남은 돈 (수입 − 저축 − 지출)</span>';
+    // 2) 성적표
+    const rows = withIncome.slice().reverse().map((o) => `<tr>
+      <td>${o.m}${o.now ? ' <span class="pill">진행 중</span>' : ''}</td><td class="num">${won(o.income)}</td><td class="num">${won(o.saving)}</td>
+      <td class="num">${won(o.avail)}</td><td class="num">${won(o.spend)}</td>
+      <td class="num ${o.left < 0 ? 'change-up' : 'change-down'}" style="font-weight:600">${o.left < 0 ? `▲ ${won(-o.left)} 넘김` : `${won(o.left)} 남김`}</td>
+      <td class="num">${o.income ? `${Math.round(o.rate * 100)}%` : '-'}</td></tr>`).join('');
+    const done = withIncome.filter((o) => !o.now);
+    const over = done.filter((o) => o.left < 0).length;
+    // 3) 쓸 수 있는 돈의 구성
+    const recent = withIncome.slice(-6).reverse();
+    const comp = recent.map((o) => {
+      const fixed = Math.min(o.fixed, o.spend); const free = o.spend - fixed;
+      const base = Math.max(o.avail, 1);
+      const w = (v) => `${Math.min(100, (Math.max(0, v) / base) * 100)}%`;
+      const freeIn = Math.max(0, Math.min(free, o.avail - fixed));
+      const tip = `<b>${o.m}</b><br>쓸 수 있는 돈 ${won(o.avail)}<br>고정 지출 ${won(fixed)} · 자유 지출 ${won(free)}<br>${o.left < 0 ? `넘김 ${won(-o.left)}` : `남음 ${won(o.left)}`}`;
+      return `<div class="catrow" data-tip="${esc(tip)}"><div class="name">${o.m}${o.now ? ' · 진행 중' : ''}</div>
+        <div class="track" style="display:flex;background:var(--surface-2);border-radius:4px;overflow:hidden;${o.left < 0 ? 'box-shadow:inset 0 0 0 2px var(--bad)' : ''}">
+          <div style="height:10px;width:${w(fixed)};background:var(--s7)"></div>
+          <div style="height:10px;width:${w(o.left < 0 ? o.avail - fixed : freeIn)};background:${o.left < 0 ? 'var(--bad)' : 'var(--s2)'}"></div>
+        </div><div class="val">${o.left < 0 ? `<span class="change-up">${man(-o.left)} 넘김</span>` : `${man(o.left)} 남음`}</div><div class="pct">${o.avail > 0 ? `${Math.round((fixed / o.avail) * 100)}%` : ''}</div></div>`;
+    }).join('');
+    const last = done.slice(-1)[0] || withIncome.slice(-1)[0];
+    const sentence = last && last.avail > 0
+      ? `${last.m}엔 쓸 수 있는 돈 ${won(last.avail)} 중 고정 지출이 ${won(last.fixed)}(${Math.round((last.fixed / last.avail) * 100)}%)를 먼저 차지해서, 자유롭게 쓸 수 있는 돈은 ${won(last.avail - last.fixed)}였어요.`
+      : '';
+    return `
+      <div class="card"><h2>수입 · 저축 · 지출</h2><p class="sub">수입은 귀속월(기준일 이후 받은 돈은 다음 달) 기준이에요. 수입 기록은 ${flow.start}부터 있어서, 그 전 달은 지출만 보여요.</p>
+        ${chart}<div class="legend">${legend}</div></div>
+      <div class="grid2" style="margin-bottom:16px">
+        <div class="card"><h2>달별 성적표</h2><p class="sub">쓸 수 있는 돈 = 수입 − 저축. ${done.length ? `끝난 ${done.length}달 중 ${over ? `<b class="change-up">${over}달 넘김</b>` : '넘긴 달 없음'}.` : ''}</p>
+          ${withIncome.length ? `<div class="tablewrap"><table><thead><tr><th>달</th><th class="num">수입</th><th class="num">저축</th><th class="num">쓸 수 있는 돈</th><th class="num">지출</th><th class="num">결과</th><th class="num">저축률</th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="muted">이 기간엔 수입 기록이 없어요.</p>'}</div>
+        <div class="card"><h2>쓸 수 있는 돈의 구성</h2><p class="sub">막대 전체 = 그달 쓸 수 있는 돈, 회색 = 남은 돈. 오른쪽 %는 고정 지출이 차지한 몫이에요.</p>
+          <div class="legend" style="margin:0 0 8px"><span><i class="dot" style="background:var(--s7)"></i>고정 지출</span><span><i class="dot" style="background:var(--s2)"></i>자유 지출</span><span><i class="dot" style="background:var(--bad)"></i>다 쓰고 넘친 달</span></div>
+          ${comp || '<p class="muted">이 기간엔 수입 기록이 없어요.</p>'}${sentence ? `<p class="note" style="margin-top:10px">${sentence}</p>` : ''}</div>
+      </div>`;
+  }
+
   // ---------- 대시보드 ----------
   function viewDash() {
     const items = D.items.filter(inRange);
@@ -1047,6 +1171,7 @@ details summary { cursor: pointer; font-weight: 600; margin: 4px 0; }
     const drill = UI.drill ? drillHtml(UI.drill) : '';
     return `
       <div class="filters">${periodControl()}<span class="muted">${range()[0]} ~ ${range()[1]}</span></div>
+      ${flowCards(months, recurring)}
       <div class="tiles">
         <div class="tile"><div class="k">총지출</div><div class="v">${won(total)}</div><div class="d">${spend.length}건</div></div>
         <div class="tile"><div class="k">월평균</div><div class="v">${won(total / mCount)}</div><div class="d">${mCount}개월 기준</div></div>
@@ -1215,7 +1340,7 @@ details summary { cursor: pointer; font-weight: 600; margin: 4px 0; }
     const groups = new Map();
     const agentRows = [];
     for (const x of D.items) {
-      if (x.r.amount <= 0 || C.NOT_SPENDING_CATS.includes(x.r.cat) || x.r.canceled) continue;
+      if (x.r.amount <= 0 || C.NOT_SPENDING_CATS.includes(x.r.cat) || x.r.canceled || !x.r.include) continue;
       if (x.c.cat && x.c.sub) continue;
       if (x.c.agent) { agentRows.push(x); continue; }
       if (!groups.has(x.c.key)) groups.set(x.c.key, { key: x.c.key, store: x.r.store, list: [], cat: x.c.cat });

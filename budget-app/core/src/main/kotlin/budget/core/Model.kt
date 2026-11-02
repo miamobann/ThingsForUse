@@ -25,7 +25,7 @@ enum class Kind {
     /** 계좌 이체·송금 */
     TRANSFER,
 
-    /** 계좌 입금 (더치페이로 돌려받은 돈 등). 지출에는 안 들어가고, 결제와 상계할 때 쓴다. */
+    /** 계좌 입금. 카테고리로 수입 / 돌려받은 돈 / 내 계좌 이동을 나눈다. 지출에는 안 들어간다. */
     INCOME,
 }
 
@@ -66,4 +66,6 @@ data class Tx(
     val linkedNaverPay: Boolean = false,
     val memo: String = "",
     val raw: String = "",
+    /** 상계: 이 환불·입금이 돌려준 결제의 id. 결제는 그대로 두고 통계에서 이만큼 줄여 센다. */
+    val offsetOf: Long? = null,
 )

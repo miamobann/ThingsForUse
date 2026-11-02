@@ -2,15 +2,27 @@ package budget.app.data
 
 import android.content.Context
 import budget.core.Categories
+import budget.core.MoneyFlow
 import java.time.YearMonth
 
 /** 간단한 설정값 */
 class Prefs(ctx: Context) {
     private val p = ctx.applicationContext.getSharedPreferences("settings", Context.MODE_PRIVATE)
 
+    /** 직접 정한 월 예산 (자동 계산을 끄거나, 그 달 수입이 아직 없을 때 쓴다) */
     var monthlyBudget: Long
         get() = p.getLong("budget", 500_000)
         set(v) = p.edit().putLong("budget", v).apply()
+
+    /** 월 예산 = 그 달 수입 − 저축 으로 자동 계산 */
+    var budgetAuto: Boolean
+        get() = p.getBoolean("budget_auto", true)
+        set(v) = p.edit().putBoolean("budget_auto", v).apply()
+
+    /** 기준일: 이날(포함) 이후 받은 수입은 다음 달 수입. 0이면 받은 달 그대로 */
+    var cutoffDay: Int
+        get() = p.getInt("cutoff", MoneyFlow.DEFAULT_CUTOFF)
+        set(v) = p.edit().putInt("cutoff", v.coerceIn(0, 31)).apply()
 
     /** 송금을 지출 합계에 넣을지 (전체 스위치) */
     var includeTransfers: Boolean

@@ -74,10 +74,29 @@ class RecurringAndCsvTest {
         assertEquals(3, b.parsed.installmentMonths)
         assertEquals("메모, 쉼표", b.memo)
         assertEquals(Kind.INCOME, c.parsed.kind)
+        assertEquals(null, c.category) // 예전 '입금' 카테고리는 구분 안 한 입금으로
         assertFalse(c.includeInSpending)
         assertEquals(15_000, c.parsed.amount)
         assertEquals(Kind.CANCEL, d.parsed.kind)
         assertEquals(Kind.TRANSFER, e.parsed.kind)
+    }
+}
+
+class AppCsvFlowColumnsTest {
+    @Test
+    fun readsKindAndOffsetColumns() {
+        val csv = "id,날짜,시각,금액,가게명,원래가게명,카테고리,결제수단,할부,송금여부,지출포함여부,취소됨,메모,출처,종류,상계대상,귀속월\n" +
+            "10,2026-10-10,19:00,60000,고깃집,고깃집,식비,현대카드,,N,Y,N,,카드 알림,결제,,2026-10\n" +
+            "11,2026-10-11,09:00,-20000,홍길동,홍길동,돌려받은 돈,농협,,N,N,N,,농협 문자,입금,10,2026-10\n" +
+            "12,2026-10-31,09:00,-800000,회사,회사,수입,농협,,N,N,N,,농협 문자,입금,,2026-11\n" +
+            "13,2026-11-01,09:00,300000,적금,적금,저축,농협,,Y,N,N,,농협 문자,출금,,2026-11\n"
+        val (pay, back, salary, saving) = AppCsv.parse(csv).rows
+        assertEquals(10L, pay.fileId)
+        assertEquals(Kind.INCOME, back.parsed.kind)
+        assertEquals(10L, back.offsetTarget)
+        assertEquals(MoneyFlow.EARNED, salary.category)
+        assertEquals(Kind.TRANSFER, saving.parsed.kind)
+        assertFalse(saving.includeInSpending)
     }
 }
 

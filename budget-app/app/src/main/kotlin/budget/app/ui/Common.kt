@@ -64,6 +64,8 @@ object C {
         "쇼핑" to Color(0xFFC2620F), "구독" to Color(0xFF7C3AED), "여가" to Color(0xFFDB2777),
         "생활" to Color(0xFF0E7490), "의료" to Color(0xFFB91C1C), Categories.TRANSFER to Color(0xFF475569),
         "기타" to Color(0xFF6B7280), Categories.UNCATEGORIZED to Color(0xFF9AA1AB),
+        budget.core.MoneyFlow.EARNED to Color(0xFF15803D), budget.core.MoneyFlow.SAVING to Color(0xFF1E40AF),
+        budget.core.MoneyFlow.RETURNED to Color(0xFF0F766E), budget.core.MoneyFlow.OWN to Color(0xFF64748B),
     )
     private val extra = listOf(Color(0xFF65A30D), Color(0xFF1D4ED8), Color(0xFFA16207), Color(0xFF7E22CE))
 
@@ -137,7 +139,7 @@ fun CategoryBadge(category: String?, size: Int = 36) {
 
 @Composable
 fun TxRow(t: Tx, onClick: () -> Unit) {
-    val struck = t.cancelled || !t.includeInSpending
+    val struck = t.cancelled || (!t.includeInSpending && t.kind != Kind.INCOME && !budget.core.MoneyFlow.isFlowCategory(t.category)) || t.offsetOf != null
     Row(
         Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -151,11 +153,12 @@ fun TxRow(t: Tx, onClick: () -> Unit) {
                 textDecoration = if (t.cancelled) TextDecoration.LineThrough else null,
             )
             val bits = buildList {
-                add(t.category ?: "미분류")
+                add(t.category ?: if (t.kind == Kind.INCOME) "구분 안 함" else "미분류")
                 add(if (t.timeKnown) t.time.format(MD_HM) else t.time.format(MD))
                 if (t.cancelled) add("취소됨")
                 budget.core.Installment.of(t)?.let { add("${it.months}개월 할부 · 남은 ${won(it.remaining)}") }
-                if (!t.includeInSpending) add("지출 제외")
+                if (t.offsetOf != null) add("상계됨")
+                else if (!t.includeInSpending && t.kind != Kind.INCOME && !budget.core.MoneyFlow.isFlowCategory(t.category)) add("지출 제외")
                 add(t.source.label)
             }
             Text(bits.joinToString(" · "), fontSize = 12.sp, color = C.sub, maxLines = 1, overflow = TextOverflow.Ellipsis)

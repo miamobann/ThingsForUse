@@ -42,6 +42,7 @@ import budget.core.Installment
 import budget.core.Kind
 import budget.core.Offset
 import budget.core.Merchants
+import budget.core.MoneyFlow
 import budget.core.Tx
 
 /** 거래 한 건: 카테고리 고르기, 지출 포함 여부, 메모, 삭제 */
@@ -77,7 +78,10 @@ private fun TxEditor(t: Tx, onClose: () -> Unit) {
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            if (t.category == null) Text("처음 보는 가게예요", fontSize = 13.sp, color = C.accent, fontWeight = FontWeight.Medium)
+            if (t.category == null) Text(
+                if (t.kind == Kind.INCOME) "처음 보는 입금이에요" else "처음 보는 가게예요",
+                fontSize = 13.sp, color = C.accent, fontWeight = FontWeight.Medium,
+            )
             Text(t.merchant, fontSize = 20.sp, fontWeight = FontWeight.Bold)
             Text(
                 listOfNotNull(
@@ -97,18 +101,43 @@ private fun TxEditor(t: Tx, onClose: () -> Unit) {
             }
         }
 
-        OffsetSection(t, onClose)
-
-        Text("카테고리", fontSize = 15.sp, fontWeight = FontWeight.Medium)
-        prefs.categories.chunked(3).forEach { row ->
+        val income = t.kind == Kind.INCOME
+        if (income) {
+            Text("어떤 입금인가요?", fontSize = 15.sp, fontWeight = FontWeight.Medium)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                row.forEach { c -> Chip(c, category == c, Modifier.weight(1f)) { category = c } }
-                repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
+                MoneyFlow.INCOME_CHOICES.forEach { c -> Chip(c, category == c, Modifier.weight(1f)) { category = c } }
+            }
+            Text(
+                when (category) {
+                    MoneyFlow.EARNED -> "번 돈이에요(월급·부수입·이자). 기준일(${prefs.cutoffDay}일) 이후 받으면 다음 달 수입으로 세요."
+                    MoneyFlow.RETURNED -> "더치페이·환불처럼 돌려받은 돈이에요. 아래에서 원래 결제와 연결하면 그 결제가 줄어든 금액으로 세져요."
+                    MoneyFlow.OWN -> "내 다른 계좌에서 옮긴 돈이에요(적금 만기 포함). 수입도 지출도 아니에요."
+                    else -> "골라 두면 다음부터 이 사람이 보낸 돈은 자동으로 같은 구분이 돼요."
+                },
+                fontSize = 12.sp, color = C.sub, lineHeight = 17.sp,
+            )
+        } else {
+            Text("카테고리", fontSize = 15.sp, fontWeight = FontWeight.Medium)
+            val choices = prefs.categories + (if (t.kind == Kind.TRANSFER || category in MoneyFlow.OUT_CHOICES) MoneyFlow.OUT_CHOICES else emptyList())
+            choices.chunked(3).forEach { row ->
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    row.forEach { c ->
+                        Chip(c, category == c, Modifier.weight(1f)) {
+                            category = c
+                            if (MoneyFlow.isFlowCategory(c)) include = false
+                            else if (MoneyFlow.isFlowCategory(t.category)) include = true
+                        }
+                    }
+                    repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
+                }
+            }
+            if (t.kind == Kind.TRANSFER) {
+                Text("적금 등은 '저축', 내 다른 계좌로 보낸 돈은 '내 계좌 이동'을 고르면 지출에서 빠져요.", fontSize = 12.sp, color = C.sub, lineHeight = 17.sp)
             }
         }
-        if (newCategory == null) {
+        if (!income && newCategory == null) {
             Text("+ 새 카테고리 만들기", color = C.accent, fontSize = 14.sp, modifier = Modifier.clickable { newCategory = "" }.padding(vertical = 4.dp))
-        } else {
+        } else if (!income) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 OutlinedTextField(newCategory!!, { newCategory = it.take(10) }, Modifier.weight(1f), singleLine = true, label = { Text("새 카테고리 이름") })
                 Spacer(Modifier.padding(4.dp))
@@ -129,11 +158,11 @@ private fun TxEditor(t: Tx, onClose: () -> Unit) {
         } else {
             Row(Modifier.fillMaxWidth().clickable { keepRule = !keepRule }, verticalAlignment = Alignment.CenterVertically) {
                 Checkbox(keepRule, { keepRule = it })
-                Text("다음부터 이 가게는 자동으로 같은 카테고리로 분류", fontSize = 14.sp)
+                Text(if (income) "다음부터 이 사람이 보낸 돈은 자동으로 같은 구분" else "다음부터 이 가게는 자동으로 같은 카테고리로 분류", fontSize = 14.sp)
             }
         }
 
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        if (!income) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text("지출에 포함", fontSize = 15.sp)
                 Text(
@@ -143,6 +172,8 @@ private fun TxEditor(t: Tx, onClose: () -> Unit) {
             }
             Switch(include, { include = it })
         }
+
+        OffsetSection(t, onClose)
 
         OutlinedTextField(memo, { memo = it }, Modifier.fillMaxWidth(), label = { Text("메모") }, singleLine = true)
 
@@ -180,7 +211,7 @@ private fun TxEditor(t: Tx, onClose: () -> Unit) {
 fun UncategorizedScreen(onBack: () -> Unit, openTx: (Long) -> Unit) {
     val list = rememberData { it.uncategorized() } ?: return
     Column(Modifier.fillMaxSize()) {
-        TopBar("분류 안 된 결제 ${list.size}건", onBack)
+        TopBar("분류 안 된 내역 ${list.size}건", onBack)
         if (list.isEmpty()) {
             Text("모두 분류했어요", Modifier.padding(24.dp), color = C.sub)
         }
@@ -195,15 +226,58 @@ fun UncategorizedScreen(onBack: () -> Unit, openTx: (Long) -> Unit) {
     }
 }
 
-/** 상계: 환불·입금을 원래 결제와 맞붙여 지우거나 금액을 줄인다 */
+/**
+ * 상계: 환불·입금을 원래 결제와 연결한다. 둘 다 그대로 두고, 통계에서 결제를 돌려받은 만큼 줄여 센다.
+ * - 환불·입금 쪽: 연결된 결제를 보여 주고 풀 수 있다. 아직이면 연결할 결제를 고른다.
+ * - 결제 쪽: 연결된 환불·입금 목록과 실제 지출. 더 연결할 수도 있다.
+ */
 @Composable
 private fun OffsetSection(t: Tx, onClose: () -> Unit) {
-    if (!(t.kind == Kind.INCOME || t.kind == Kind.CANCEL || ((t.kind == Kind.PAYMENT || t.kind == Kind.TRANSFER) && !t.cancelled))) return
     val ctx = LocalContext.current
     val repo = Repository.get(ctx)
-    var open by remember(t.id) { mutableStateOf(t.kind == Kind.INCOME || t.kind == Kind.CANCEL) }
+    val isBack = Offset.isBack(t) || t.offsetOf != null
+    val isSpend = (t.kind == Kind.PAYMENT || t.kind == Kind.TRANSFER) && !t.cancelled && !MoneyFlow.isFlowCategory(t.category)
+    if (!isBack && !isSpend) return
+
+    fun save(vararg list: Tx) {
+        repo.writer.execute {
+            repo.transaction { list.forEach { repo.update(it) } }
+            repo.changed()
+        }
+        onClose()
+    }
+
+    // 이미 연결된 것
+    val linked = rememberData(t.id, t.offsetOf) { r ->
+        if (t.offsetOf != null) listOfNotNull(r.byId(t.offsetOf!!)) else if (isSpend) r.linkedTo(t.id) else emptyList()
+    } ?: return
+    if (linked.isNotEmpty()) {
+        Column(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(C.accentSoft).padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            if (t.offsetOf != null) {
+                val pay = linked.single()
+                Text("상계됨: 이 돈만큼 아래 결제가 줄어든 금액으로 세져요", fontSize = 13.sp, color = C.accentDark, fontWeight = FontWeight.Medium)
+                LinkedRow(pay, "연결 풀기") { save(Offset.unlink(t)) }
+            } else {
+                val back = linked.sumOf { it.amount }
+                Text(
+                    "돌려받은 돈 ${won(back)} 연결됨 · 실제 지출 ${won((t.amount - back).coerceAtLeast(0))}",
+                    fontSize = 13.sp, color = C.accentDark, fontWeight = FontWeight.Medium,
+                )
+                linked.forEach { b -> LinkedRow(b, "풀기") { save(Offset.unlink(b)) } }
+            }
+        }
+        if (t.offsetOf != null) return
+    }
+
+    var open by remember(t.id) { mutableStateOf(Offset.isOpen(t)) }
     if (!open) {
-        Text("환불·더치페이 입금과 상계하기", color = C.accent, fontSize = 14.sp, modifier = Modifier.clickable { open = true }.padding(vertical = 4.dp))
+        Text(
+            if (isSpend) "환불·더치페이 입금과 상계하기" else "원래 결제와 상계하기",
+            color = C.accent, fontSize = 14.sp, modifier = Modifier.clickable { open = true }.padding(vertical = 4.dp),
+        )
         return
     }
     val candidates = rememberData(t.id) { r -> Offset.candidates(t, r.between(t.time.minusDays(62), t.time.plusDays(62))).take(8) } ?: return
@@ -211,25 +285,12 @@ private fun OffsetSection(t: Tx, onClose: () -> Unit) {
         Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(C.ground).padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        Text(
-            if (t.kind == Kind.INCOME || t.kind == Kind.CANCEL) "어느 결제와 상계할까요?" else "어느 환불·입금과 상계할까요?",
-            fontSize = 14.sp, fontWeight = FontWeight.Medium,
-        )
-        Text("금액이 같으면 둘 다 지우고, 돌려받은 돈이 적으면 결제 금액을 그만큼 줄여요.", fontSize = 12.sp, color = C.sub, lineHeight = 17.sp)
+        Text(if (isSpend) "어느 환불·입금과 상계할까요?" else "어느 결제와 상계할까요?", fontSize = 14.sp, fontWeight = FontWeight.Medium)
+        Text("둘 다 지우지 않고 연결만 해요. 결제는 돌려받은 만큼 줄어든 금액으로 세고, 나중에 풀 수 있어요.", fontSize = 12.sp, color = C.sub, lineHeight = 17.sp)
         if (candidates.isEmpty()) Text("앞뒤 두 달 안에 상계할 내역이 없어요", fontSize = 13.sp, color = C.sub)
         candidates.forEach { c ->
             Row(
-                Modifier.fillMaxWidth().clickable {
-                    val r = Offset.apply(t, c)
-                    repo.writer.execute {
-                        repo.transaction {
-                            r.update.forEach { repo.update(it) }
-                            r.delete.forEach { repo.delete(it) }
-                        }
-                        repo.changed()
-                    }
-                    onClose()
-                }.padding(vertical = 8.dp),
+                Modifier.fillMaxWidth().clickable { save(Offset.link(t, c)) }.padding(vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(Modifier.weight(1f)) {
@@ -242,14 +303,25 @@ private fun OffsetSection(t: Tx, onClose: () -> Unit) {
     }
 }
 
+@Composable
+private fun LinkedRow(o: Tx, action: String, onAction: () -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(o.merchant, fontSize = 14.sp, maxLines = 1)
+            Text(o.time.format(if (o.timeKnown) MD_HM else MD) + " · " + sign(o) + won(o.amount), fontSize = 12.sp, color = C.sub)
+        }
+        Text(action, fontSize = 13.sp, color = C.warn, fontWeight = FontWeight.Medium, modifier = Modifier.clickable(onClick = onAction).padding(8.dp))
+    }
+}
+
 /** 상계 안 한 입금·다음 달 환불 모아 보기 */
 @Composable
 fun RefundsScreen(onBack: () -> Unit, openTx: (Long) -> Unit) {
     val list = rememberData { it.openRefunds() } ?: return
     Column(Modifier.fillMaxSize()) {
-        TopBar("입금·환불 ${list.size}건", onBack)
+        TopBar("상계 안 한 돈 ${list.size}건", onBack)
         Text(
-            "눌러서 원래 결제와 상계하세요. 더치페이 입금이면 그 결제 금액이 줄어요. 상계할 필요 없는 입금은 그대로 두면 돼요(지출에 안 들어가요).",
+            "돌려받은 돈·환불 중 아직 원래 결제와 연결하지 않은 것(최근 3달)이에요. 눌러서 연결하면 그 결제가 줄어든 금액으로 세져요. 연결하지 않은 환불은 들어온 달 지출에서 빠져요.",
             fontSize = 13.sp, color = C.sub, lineHeight = 18.sp, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
         )
         LazyColumn(Modifier.padding(horizontal = 16.dp).clip(RoundedCornerShape(18.dp)).background(C.card)) {

@@ -3,7 +3,9 @@ package budget.app.data
 import android.content.Context
 import android.net.Uri
 import budget.core.Channel
+import budget.core.AppCsv
 import budget.core.Kind
+import budget.core.MoneyFlow
 import budget.core.Source
 import budget.core.Tx
 import org.json.JSONArray
@@ -29,7 +31,7 @@ object Export {
 
     val CSV_HEADER = listOf(
         "id", "날짜", "시각", "금액", "가게명", "원래가게명", "카테고리", "결제수단", "할부",
-        "송금여부", "지출포함여부", "취소됨", "메모", "출처",
+        "송금여부", "지출포함여부", "취소됨", "메모", "출처", "종류", "상계대상", "귀속월",
     )
 
     fun payMethod(t: Tx): String = when (t.source.channel) {
@@ -39,15 +41,18 @@ object Export {
         Channel.MANUAL -> "현금"
     }
 
-    fun csv(txs: List<Tx>): String {
+    fun csv(txs: List<Tx>, cutoff: Int): String {
         val sb = StringBuilder("﻿")
         sb.append(CSV_HEADER.joinToString(",")).append("\r\n")
-        for (row in rows(txs)) sb.append(row.joinToString(",") { cell(it) }).append("\r\n")
+        for (row in rows(txs, cutoff)) sb.append(row.joinToString(",") { cell(it) }).append("\r\n")
         return sb.toString()
     }
 
-    /** CSV·시트 공통: 한 건을 14개 열로 */
-    fun rows(txs: List<Tx>): List<List<String>> = txs.sortedWith(compareBy({ it.time }, { it.id })).map { t ->
+    /**
+     * CSV·시트 공통: 한 건을 17개 열로.
+     * 15 종류(결제/환불/출금/입금), 16 상계대상(이 환불·입금이 돌려준 결제 id), 17 귀속월(기준일 이후 수입은 다음 달).
+     */
+    fun rows(txs: List<Tx>, cutoff: Int): List<List<String>> = txs.sortedWith(compareBy({ it.time }, { it.id })).map { t ->
             val amount = if (t.kind == Kind.CANCEL || t.kind == Kind.INCOME) -t.amount else t.amount
             listOf(
                 t.id.toString(),
@@ -64,6 +69,9 @@ object Export {
                 if (t.cancelled) "Y" else "N",
                 t.memo,
                 t.source.label,
+                AppCsv.KIND_LABELS.getValue(t.kind),
+                t.offsetOf?.toString() ?: "",
+                MoneyFlow.budgetMonth(t, cutoff).toString(),
             )
         }
 
@@ -82,6 +90,7 @@ object Export {
                 put("cancelled", t.cancelled); put("include", t.includeInSpending)
                 put("approvalNo", t.approvalNo ?: JSONObject.NULL); put("installment", t.installmentMonths)
                 put("linkedNaverPay", t.linkedNaverPay); put("memo", t.memo); put("raw", t.raw)
+                put("offsetOf", t.offsetOf ?: JSONObject.NULL)
             })
         }
         val rules = JSONObject()
@@ -89,6 +98,7 @@ object Export {
         return JSONObject().apply {
             put("app", "budget"); put("version", 1); put("savedAt", LocalDateTime.now().toString())
             put("budget", prefs.monthlyBudget); put("includeTransfers", prefs.includeTransfers)
+            put("budgetAuto", prefs.budgetAuto); put("cutoff", prefs.cutoffDay)
             put("categories", JSONArray(prefs.categories))
             put("rules", rules); put("tx", txs)
         }.toString()
@@ -121,14 +131,20 @@ object Export {
                         linkedNaverPay = t.optBoolean("linkedNaverPay"),
                         memo = t.optString("memo"),
                         raw = t.optString("raw"),
+                        offsetOf = if (t.isNull("offsetOf")) null else t.optLong("offsetOf"),
                     )
+                    .let { // 예전 백업의 '입금' 카테고리는 구분 안 한 입금으로
+                        if (it.kind == Kind.INCOME && it.category == budget.core.Categories.INCOME) it.copy(category = MoneyFlow.defaultIncomeCategory(it.merchant)) else it
+                    }
                 if (id > 0) repo.insertWithId(tx) else repo.insert(tx)
             }
             val rules = o.optJSONObject("rules")
-            rules?.keys()?.forEach { k -> repo.putRule(k, rules.getString(k)) }
+            rules?.keys()?.forEach { k -> rules.getString(k).takeIf { it != budget.core.Categories.INCOME }?.let { repo.putRule(k, it) } }
         }
         prefs.monthlyBudget = o.optLong("budget", prefs.monthlyBudget)
         prefs.includeTransfers = o.optBoolean("includeTransfers", prefs.includeTransfers)
+        prefs.budgetAuto = o.optBoolean("budgetAuto", prefs.budgetAuto)
+        prefs.cutoffDay = o.optInt("cutoff", prefs.cutoffDay)
         o.optJSONArray("categories")?.let { a -> prefs.categories = (0 until a.length()).map { a.getString(it) } }
         repo.changed()
         return arr.length()
@@ -154,7 +170,7 @@ object Export {
         val links = AutoSaveLinks(ctx)
         var error: String? = null
         links.csv?.let { uri ->
-            runCatching { write(ctx, uri, csv(repo.all())) }.onFailure { error = "CSV 저장 실패: ${it.message}" }
+            runCatching { write(ctx, uri, csv(repo.all(), Prefs(ctx).cutoffDay)) }.onFailure { error = "CSV 저장 실패: ${it.message}" }
         }
         links.backup?.let { uri ->
             runCatching { write(ctx, uri, backupJson(repo, Prefs(ctx))) }.onFailure { error = "백업 저장 실패: ${it.message}" }

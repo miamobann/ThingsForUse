@@ -19,11 +19,13 @@ import budget.core.AppCsv.toNewTx
 import budget.core.Categories
 import budget.core.Matcher
 import budget.core.Merchants
+import budget.core.MoneyFlow
+import budget.core.Kind
+import budget.app.data.Summary
 import budget.core.NaverPayParser
 import budget.core.NhBankSmsParser
 import budget.core.Parsed
 import budget.core.Source
-import budget.core.Stats
 import budget.core.Tx
 import budget.core.toTx
 import java.time.LocalDateTime
@@ -114,11 +116,11 @@ object Ingest {
         if (after != before) checkBudget(ctx, prefs, after)
     }
 
-    /** 직접 입력 */
+    /** 직접 입력 (현금 지출, 저축, 수입) */
     fun addManual(ctx: Context, p: Parsed, category: String) {
         val repo = Repository.get(ctx)
         repo.writer.execute {
-            repo.insert(p.toTx(0, category))
+            repo.insert(MoneyFlow.withCategory(p.toTx(0, category), category))
             repo.changed()
             checkBudget(ctx, Prefs(ctx), monthSpent(repo, Prefs(ctx), YearMonth.now()))
         }
@@ -166,6 +168,9 @@ object Ingest {
         val consumed = mutableSetOf<Long>()
         // 파일 안의 줄끼리는 이미 정리된 내역이라 서로 비교하지 않는다 (같은 금액이라도 시각이 다르면 다른 결제)
         val inserted = mutableSetOf<Long>()
+        // 파일 id → 앱 id (상계 연결을 옮기려고)
+        val idMap = mutableMapOf<Long, Long>()
+        val wantsLink = mutableListOf<Pair<Long, Long>>()
         var added = 0
         repo.transaction {
             for (row in rows) {
@@ -175,16 +180,25 @@ object Ingest {
                     val id = repo.insert(row.toNewTx())
                     inserted += id
                     added++
+                    row.fileId?.let { idMap[it] = id }
+                    row.offsetTarget?.let { wantsLink += id to it }
                     val c = row.category
-                    if (c != null && row.includeInSpending && c != Categories.TRANSFER &&
-                        !Merchants.isPaymentAgentOnly(row.merchant) && repo.ruleFor(row.merchant) == null
-                    ) repo.putRule(Merchants.key(row.merchant), c)
+                    val kind = row.parsed.kind
+                    if (c != null && (row.includeInSpending || MoneyFlow.isFlowCategory(c)) && c != Categories.TRANSFER &&
+                        !Merchants.isPaymentAgentOnly(row.merchant) && repo.ruleFor(row.merchant, kind) == null
+                    ) repo.putRule(MoneyFlow.ruleKey(row.merchant, kind), c)
                 } else {
                     if (d is Matcher.Decision.Duplicate) {
+                        row.fileId?.let { idMap[it] = d.existing.id }
                         consumed += d.existing.id
-                        if (d.existing.category == null && row.category != null) repo.update(d.existing.copy(category = row.category))
+                        if (d.existing.category == null && row.category != null) repo.update(MoneyFlow.withCategory(d.existing, row.category))
                     } else apply(repo, p, d)
                 }
+            }
+            // 파일에 있던 상계 연결을 앱 id로 옮긴다
+            for ((id, target) in wantsLink) {
+                val to = idMap[target] ?: continue
+                repo.byId(id)?.let { repo.update(it.copy(offsetOf = to)) }
             }
         }
         repo.changed()
@@ -194,7 +208,7 @@ object Ingest {
     /** 결정대로 DB를 바꾸고, 새로 생기거나 이름이 바뀐 거래를 돌려준다 */
     private fun apply(repo: Repository, p: Parsed, d: Matcher.Decision): Tx? = when (d) {
         Matcher.Decision.Insert -> {
-            val category = repo.ruleFor(p.merchant) ?: Merchants.suggestCategory(p.merchant, p.kind)
+            val category = repo.ruleFor(p.merchant, p.kind) ?: Merchants.suggestCategory(p.merchant, p.kind)
             val tx = p.toTx(0, category)
             tx.copy(id = repo.insert(tx))
         }
@@ -208,7 +222,7 @@ object Ingest {
             // 카드에는 대행사 이름만 있었으니 네이버페이의 실제 가게 이름으로 바꾸고 분류도 다시 해 본다
             val name = Merchants.displayName(d.merchant)
             val category = d.existing.category.takeUnless { Merchants.isPaymentAgentOnly(d.existing.merchant) }
-                ?: repo.ruleFor(name) ?: Merchants.suggestCategory(name, d.existing.kind)
+                ?: repo.ruleFor(name, d.existing.kind) ?: Merchants.suggestCategory(name, d.existing.kind)
             val t = d.existing.copy(merchant = name, linkedNaverPay = true, category = category)
             repo.update(t)
             t
@@ -234,14 +248,12 @@ object Ingest {
         Matcher.Decision.Ignore -> null
     }
 
-    fun monthSpent(repo: Repository, prefs: Prefs, ym: YearMonth): Long {
-        val txs = repo.between(ym.atDay(1).atStartOfDay(), ym.plusMonths(1).atDay(1).atStartOfDay())
-        return Stats(txs, prefs.includeTransfers).monthTotal(ym)
-    }
+    fun monthSpent(repo: Repository, prefs: Prefs, ym: YearMonth): Long =
+        Summary.stats(repo, prefs, ym).monthTotal(ym)
 
     private fun checkBudget(ctx: Context, prefs: Prefs, spent: Long) {
         val ym = YearMonth.now()
-        val budget = prefs.monthlyBudget
+        val budget = Summary.budget(prefs, Summary.stats(Repository.get(ctx), prefs, ym), ym)
         val level = BudgetAlert.due(budget, spent, prefs.alertsSent(ym)) ?: return
         prefs.markAlertSent(ym, level)
         val text = if (level >= 100) "이번 달 예산 ${won(budget)}을 넘었어요. 지금까지 ${won(spent)}"
@@ -250,9 +262,12 @@ object Ingest {
     }
 
     private fun askCategory(ctx: Context, t: Tx) {
+        val income = t.kind == Kind.INCOME
         notify(
             ctx, BudgetApp.CHANNEL_CATEGORY, (t.id % 100_000).toInt(),
-            "처음 보는 가게예요: ${t.merchant}", "${won(t.amount)} · 눌러서 카테고리를 골라주세요", t.id,
+            if (income) "처음 보는 입금이에요: ${t.merchant}" else "처음 보는 가게예요: ${t.merchant}",
+            if (income) "+${won(t.amount)} · 수입인지, 돌려받은 돈인지 골라주세요" else "${won(t.amount)} · 눌러서 카테고리를 골라주세요",
+            t.id,
         )
     }
 

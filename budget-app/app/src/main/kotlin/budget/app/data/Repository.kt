@@ -7,6 +7,8 @@ import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import budget.core.Kind
 import budget.core.Merchants
+import budget.core.MoneyFlow
+import budget.core.Offset
 import budget.core.Source
 import budget.core.Tx
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -18,7 +20,7 @@ private const val NOTI_LOG_SQL =
     "CREATE TABLE IF NOT EXISTS noti_log(id INTEGER PRIMARY KEY AUTOINCREMENT, time TEXT NOT NULL, origin TEXT NOT NULL, " +
         "text TEXT NOT NULL, result TEXT NOT NULL, tx_id INTEGER)"
 
-private class DbHelper(ctx: Context) : SQLiteOpenHelper(ctx, "budget.db", null, 2) {
+private class DbHelper(ctx: Context) : SQLiteOpenHelper(ctx, "budget.db", null, 3) {
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
             """CREATE TABLE tx(
@@ -28,7 +30,8 @@ private class DbHelper(ctx: Context) : SQLiteOpenHelper(ctx, "budget.db", null, 
                 category TEXT, source TEXT NOT NULL, kind TEXT NOT NULL,
                 cancelled INTEGER NOT NULL DEFAULT 0, include_in_spending INTEGER NOT NULL DEFAULT 1,
                 approval_no TEXT, installment INTEGER NOT NULL DEFAULT 0,
-                linked_np INTEGER NOT NULL DEFAULT 0, memo TEXT NOT NULL DEFAULT '', raw TEXT NOT NULL DEFAULT '')"""
+                linked_np INTEGER NOT NULL DEFAULT 0, memo TEXT NOT NULL DEFAULT '', raw TEXT NOT NULL DEFAULT '',
+                offset_of INTEGER)"""
         )
         db.execSQL("CREATE INDEX tx_time ON tx(time)")
         db.execSQL("CREATE TABLE rule(merchant_key TEXT PRIMARY KEY, category TEXT NOT NULL)")
@@ -38,6 +41,20 @@ private class DbHelper(ctx: Context) : SQLiteOpenHelper(ctx, "budget.db", null, 
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         if (oldVersion < 2) db.execSQL(NOTI_LOG_SQL)
+        if (oldVersion < 3) {
+            // 상계 연결 열. 입금은 이제 수입/돌려받은 돈/내 계좌 이동으로 나눈다:
+            // 예전 '입금' 카테고리는 지우고(사람 이름이면 돌려받은 돈), '입금'으로 기억한 규칙도 지운다.
+            db.execSQL("ALTER TABLE tx ADD COLUMN offset_of INTEGER")
+            db.execSQL("DELETE FROM rule WHERE category = '입금'")
+            db.rawQuery("SELECT id, merchant FROM tx WHERE kind = 'INCOME' AND category = '입금'", null).use { c ->
+                while (c.moveToNext()) {
+                    db.update("tx", ContentValues().apply {
+                        val cat = MoneyFlow.defaultIncomeCategory(c.getString(1))
+                        if (cat == null) putNull("category") else put("category", cat)
+                    }, "id = ?", arrayOf(c.getLong(0).toString()))
+                }
+            }
+        }
     }
 }
 
@@ -72,12 +89,28 @@ class Repository private constructor(ctx: Context) {
 
     fun byId(id: Long): Tx? = query("SELECT * FROM tx WHERE id = ?", id.toString()).firstOrNull()
 
+    /** 분류 안 된 결제와 구분 안 한 입금 */
     fun uncategorized(): List<Tx> =
         query("SELECT * FROM tx WHERE category IS NULL AND cancelled = 0 ORDER BY time DESC")
 
-    /** 아직 상계하지 않은 입금·다음 달 환불 */
-    fun openRefunds(): List<Tx> =
-        query("SELECT * FROM tx WHERE kind IN ('INCOME', 'CANCEL') AND cancelled = 0 ORDER BY time DESC")
+    /** 아직 결제와 연결하지 않은 돌려받은 돈·환불 (최근 [days]일) */
+    fun openRefunds(days: Long = 92): List<Tx> =
+        query(
+            "SELECT * FROM tx WHERE kind IN ('INCOME', 'CANCEL') AND cancelled = 0 AND offset_of IS NULL AND time >= ? ORDER BY time DESC",
+            LocalDateTime.now().minusDays(days).toString(),
+        ).filter(Offset::isOpen)
+
+    /** 결제 id → 상계로 돌려받은 금액 합 (전체 기간) */
+    fun offsetSums(): Map<Long, Long> {
+        val out = mutableMapOf<Long, Long>()
+        db.rawQuery("SELECT offset_of, SUM(amount) FROM tx WHERE offset_of IS NOT NULL AND cancelled = 0 GROUP BY offset_of", null).use { c ->
+            while (c.moveToNext()) out[c.getLong(0)] = c.getLong(1)
+        }
+        return out
+    }
+
+    /** 이 결제에 연결된 환불·입금 */
+    fun linkedTo(id: Long): List<Tx> = query("SELECT * FROM tx WHERE offset_of = ? ORDER BY time", id.toString())
 
     fun insert(t: Tx): Long = db.insert("tx", null, values(t))
 
@@ -96,7 +129,9 @@ class Repository private constructor(ctx: Context) {
         if (hook != null && !fromSync && before != t.category) hook(t.id, t.category)
     }
 
+    /** 지우는 결제에 연결돼 있던 환불·입금은 연결만 푼다 */
     fun delete(id: Long) {
+        db.update("tx", ContentValues().apply { putNull("offset_of") }, "offset_of = ?", arrayOf(id.toString()))
         db.delete("tx", "id = ?", arrayOf(id.toString()))
     }
 
@@ -108,25 +143,22 @@ class Repository private constructor(ctx: Context) {
     }
 
     /**
-     * 카테고리를 정한다. remember면 같은 가게의 다음 결제부터 자동으로 쓰고,
-     * 아직 분류 안 된 같은 가게 결제도 한꺼번에 채운다.
+     * 카테고리를 정한다. remember면 같은 가게(입금이면 같은 보낸 사람)의 다음 기록부터 자동으로 쓰고,
+     * 아직 분류 안 된 같은 가게 기록도 한꺼번에 채운다. 수입·저축 등을 고르면 지출에서 빠진다.
      * 결제대행사 이름만 있는 가게(네이버파이낸셜 등)는 기억하지 않는다.
      */
     fun setCategory(t: Tx, category: String, remember: Boolean) {
-        update(t.copy(category = category))
+        update(MoneyFlow.withCategory(t, category))
         if (remember && !Merchants.isPaymentAgentOnly(t.merchant)) {
-            val key = Merchants.key(t.merchant)
-            db.insertWithOnConflict("rule", null, ContentValues().apply {
-                put("merchant_key", key)
-                put("category", category)
-            }, SQLiteDatabase.CONFLICT_REPLACE)
-            uncategorized().filter { Merchants.key(it.merchant) == key }.forEach { update(it.copy(category = category)) }
+            val key = MoneyFlow.ruleKey(t.merchant, t.kind)
+            putRule(key, category)
+            uncategorized().filter { MoneyFlow.ruleKey(it.merchant, it.kind) == key }.forEach { update(MoneyFlow.withCategory(it, category)) }
         }
     }
 
-    fun ruleFor(merchant: String): String? {
+    fun ruleFor(merchant: String, kind: Kind): String? {
         if (Merchants.isPaymentAgentOnly(merchant)) return null
-        db.rawQuery("SELECT category FROM rule WHERE merchant_key = ?", arrayOf(Merchants.key(merchant))).use { c ->
+        db.rawQuery("SELECT category FROM rule WHERE merchant_key = ?", arrayOf(MoneyFlow.ruleKey(merchant, kind))).use { c ->
             return if (c.moveToFirst()) c.getString(0) else null
         }
     }
@@ -236,6 +268,7 @@ class Repository private constructor(ctx: Context) {
             linkedNaverPay = b("linked_np"),
             memo = s("memo"),
             raw = s("raw"),
+            offsetOf = c.getColumnIndexOrThrow("offset_of").let { if (c.isNull(it)) null else c.getLong(it) },
         )
     }
 
@@ -255,6 +288,7 @@ class Repository private constructor(ctx: Context) {
         put("linked_np", if (t.linkedNaverPay) 1 else 0)
         put("memo", t.memo)
         put("raw", t.raw)
+        if (t.offsetOf == null) putNull("offset_of") else put("offset_of", t.offsetOf)
     }
 
     companion object {

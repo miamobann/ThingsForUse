@@ -47,6 +47,7 @@ object ImportPreview {
 
 fun Parsed.toTx(id: Long, category: String?): Tx {
     val notSpending = NotSpending.ruleFor(this)
+    val c = notSpending?.category ?: category
     return Tx(
     id = id,
     time = time,
@@ -54,8 +55,8 @@ fun Parsed.toTx(id: Long, category: String?): Tx {
     amount = amount,
     merchant = Merchants.displayName(merchant),
     originalMerchant = merchant,
-    category = notSpending?.category ?: category,
-    includeInSpending = notSpending == null,
+    category = c,
+    includeInSpending = notSpending == null && kind != Kind.INCOME && !MoneyFlow.isFlowCategory(c),
     source = source,
     kind = kind,
     approvalNo = approvalNo,

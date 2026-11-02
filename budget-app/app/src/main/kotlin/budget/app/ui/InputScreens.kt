@@ -39,6 +39,7 @@ import budget.core.HyundaiCardFileParser
 import budget.core.Parsed
 import budget.core.ImportPreview
 import budget.core.Kind
+import budget.core.MoneyFlow
 import budget.core.Source
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -49,7 +50,7 @@ import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 
-/** 현금 지출 직접 입력 */
+/** 직접 입력: 현금 지출, 저축(적금 등 문자가 안 오는 것), 수입 */
 @Composable
 fun AddCashScreen(onDone: () -> Unit) {
     val ctx = LocalContext.current
@@ -59,11 +60,20 @@ fun AddCashScreen(onDone: () -> Unit) {
     var date by remember { mutableStateOf(LocalDate.now()) }
     var category by remember { mutableStateOf(prefs.categories.first()) }
     var method by remember { mutableStateOf("현금") }
+    var type by remember { mutableStateOf("지출") }
     val value = amount.filter { it.isDigit() }.toLongOrNull() ?: 0L
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-        TopBar("현금 지출 입력", onDone)
+        TopBar("직접 입력", onDone)
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("지출", MoneyFlow.SAVING, MoneyFlow.EARNED).forEach { k -> Chip(k, type == k, Modifier.weight(1f)) { type = k } }
+            }
+            if (type != "지출") Text(
+                if (type == MoneyFlow.SAVING) "적금처럼 문자가 안 오는 저축을 적어요. 지출·예산에서 빠지고, 이번 달 저축에 더해져요."
+                else "번 돈(월급·부수입 등)을 적어요. 기준일(${prefs.cutoffDay}일) 이후 날짜면 다음 달 수입으로 세요.",
+                fontSize = 13.sp, color = C.sub, lineHeight = 18.sp,
+            )
             OutlinedTextField(
                 if (value > 0) "%,d".format(value) else "", { amount = it },
                 Modifier.fillMaxWidth(), label = { Text("금액 (원)") }, singleLine = true,
@@ -79,7 +89,7 @@ fun AddCashScreen(onDone: () -> Unit) {
                 }
                 Text(date.format(DateTimeFormatter.ofPattern("yyyy년 M월 d일")), fontSize = 13.sp, color = C.sub)
             }
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (type == "지출") Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("카테고리", fontSize = 13.sp, color = C.sub)
                 prefs.categories.chunked(4).forEach { row ->
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -88,7 +98,7 @@ fun AddCashScreen(onDone: () -> Unit) {
                     }
                 }
             }
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (type == "지출") Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("결제 수단", fontSize = 13.sp, color = C.sub)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf("현금", "기타 (상품권 등)").forEach { m -> Chip(m, method == m, Modifier.weight(1f)) { method = m } }
@@ -98,11 +108,16 @@ fun AddCashScreen(onDone: () -> Unit) {
                 enabled = value > 0,
                 onClick = {
                     val time = if (date == LocalDate.now()) LocalDateTime.now() else date.atTime(LocalTime.NOON)
-                    val name = where.trim().ifEmpty { "현금" }
+                    val (kind, cat) = when (type) {
+                        MoneyFlow.SAVING -> Kind.TRANSFER to MoneyFlow.SAVING
+                        MoneyFlow.EARNED -> Kind.INCOME to MoneyFlow.EARNED
+                        else -> Kind.PAYMENT to category
+                    }
+                    val name = where.trim().ifEmpty { if (type == "지출") "현금" else type }
                     Ingest.addManual(
                         ctx,
-                        Parsed(Source.MANUAL, Kind.PAYMENT, value, name, time, timeKnown = date == LocalDate.now(), raw = method),
-                        category,
+                        Parsed(Source.MANUAL, kind, value, name, time, timeKnown = date == LocalDate.now(), raw = if (type == "지출") method else ""),
+                        cat,
                     )
                     onDone()
                 },

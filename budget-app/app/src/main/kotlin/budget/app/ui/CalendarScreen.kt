@@ -32,7 +32,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import budget.app.data.Prefs
-import budget.core.Stats
+import budget.app.data.Summary
 import java.time.LocalDate
 import java.time.YearMonth
 
@@ -44,10 +44,7 @@ fun CalendarScreen(openTx: (Long) -> Unit) {
     var ym by remember { mutableStateOf(YearMonth.from(today)) }
     var picked by remember { mutableStateOf(today) }
 
-    val txs = rememberData(ym) { repo ->
-        repo.between(ym.atDay(1).atStartOfDay(), ym.plusMonths(1).atDay(1).atStartOfDay())
-    } ?: return
-    val stats = Stats(txs, prefs.includeTransfers)
+    val stats = rememberData(ym) { repo -> Summary.stats(repo, prefs, ym) } ?: return
     val daily = stats.daily(ym)
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {

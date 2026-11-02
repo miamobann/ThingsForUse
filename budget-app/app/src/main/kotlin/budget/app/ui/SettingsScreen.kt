@@ -82,6 +82,8 @@ fun SettingsScreen(go: (Screen) -> Unit) {
     val askPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { refresh++ }
 
     var budgetText by remember { mutableStateOf(prefs.monthlyBudget.toString()) }
+    var budgetAuto by remember { mutableStateOf(prefs.budgetAuto) }
+    var cutoffText by remember { mutableStateOf(prefs.cutoffDay.toString()) }
     var includeTransfers by remember { mutableStateOf(prefs.includeTransfers) }
     var lock by remember { mutableStateOf(prefs.lockEnabled) }
     var csvUri by remember { mutableStateOf(links.csv) }
@@ -144,8 +146,13 @@ fun SettingsScreen(go: (Screen) -> Unit) {
             }
         }
 
-        SectionTitle("예산")
+        SectionTitle("예산과 수입")
         Panel {
+            SwitchRow("월 예산 자동 계산", "그 달 수입 − 저축을 쓸 수 있는 돈(예산)으로 써요.", budgetAuto) {
+                budgetAuto = it
+                prefs.budgetAuto = it
+                repo.changed()
+            }
             OutlinedTextField(
                 budgetText,
                 { v ->
@@ -153,10 +160,24 @@ fun SettingsScreen(go: (Screen) -> Unit) {
                     prefs.monthlyBudget = budgetText.toLongOrNull() ?: 0
                     repo.changed()
                 },
-                Modifier.fillMaxWidth(), label = { Text("월 예산 (원)") }, singleLine = true,
+                Modifier.fillMaxWidth(), label = { Text(if (budgetAuto) "수입이 아직 없는 달의 예산 (원)" else "월 예산 (원)") }, singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             )
             Text("예산의 80%, 100%를 넘으면 알려드려요. 0으로 두면 예산을 쓰지 않아요.", fontSize = 12.sp, color = C.sub)
+            Divider()
+            OutlinedTextField(
+                cutoffText,
+                { v ->
+                    cutoffText = v.filter { it.isDigit() }.take(2)
+                    cutoffText.toIntOrNull()?.takeIf { it in 0..31 }?.let { prefs.cutoffDay = it; repo.changed() }
+                },
+                Modifier.fillMaxWidth(), label = { Text("기준일") }, singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            )
+            Text(
+                "이날 이후(이날 포함) 받은 수입은 다음 달 수입으로 세요. 월말 월급으로 다음 달을 사는 경우예요. 내역 날짜는 그대로예요. 0이면 받은 달 그대로 세요.",
+                fontSize = 12.sp, color = C.sub, lineHeight = 17.sp,
+            )
             Divider()
             SwitchRow("송금을 지출에 포함", "끄면 송금 전체가 합계·예산에서 빠져요. 한 건씩은 내역을 눌러서 바꿀 수 있어요.", includeTransfers) {
                 includeTransfers = it
@@ -234,6 +255,8 @@ fun SettingsScreen(go: (Screen) -> Unit) {
                             }.getOrElse { "복원 실패: ${it.message}" }
                         }
                         budgetText = prefs.monthlyBudget.toString()
+                        budgetAuto = prefs.budgetAuto
+                        cutoffText = prefs.cutoffDay.toString()
                         includeTransfers = prefs.includeTransfers
                     }
                 }) { Text("복원") }

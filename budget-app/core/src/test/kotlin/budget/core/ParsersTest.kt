@@ -88,8 +88,8 @@ class ParsersTest {
         val p = NhBankSmsParser.parse("농협 입금50,000원\n11/01 10:13 352-****-7848-43\n홍길동 잔액1원", now)!!
         assertEquals(Kind.INCOME, p.kind)
         assertEquals("홍길동", p.merchant)
-        val t = p.toTx(1, null)
-        assertEquals(Categories.INCOME, t.category)
+        val t = p.toTx(1, Merchants.suggestCategory(p.merchant, p.kind))
+        assertEquals(MoneyFlow.RETURNED, t.category) // 사람 이름이면 돌려받은 돈
         assertFalse(t.includeInSpending)
     }
 

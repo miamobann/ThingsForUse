@@ -7,8 +7,9 @@ import java.time.LocalTime
  * 앱이 내보내는 '가계부_내역_전체.csv'와 같은 열의 파일을 읽는다.
  * 분석 프로그램에서 정리한 기존 내역을 앱에 처음 넣을 때 쓴다.
  *
- * 열: id, 날짜, 시각, 금액, 가게명, 원래가게명, 카테고리, 결제수단, 할부, 송금여부, 지출포함여부, 취소됨, 메모, 출처
- * 금액이 음수면 환불(카테고리가 '입금'이면 입금), 송금여부=Y면 송금.
+ * 열: id, 날짜, 시각, 금액, 가게명, 원래가게명, 카테고리, 결제수단, 할부, 송금여부, 지출포함여부, 취소됨, 메모, 출처,
+ *     종류(결제/환불/출금/입금), 상계대상(돌려준 결제의 id), 귀속월
+ * 종류 열이 없는 예전 파일: 금액이 음수면 환불(카테고리가 '입금'이면 입금), 송금여부=Y면 송금.
  */
 object AppCsv {
 
@@ -19,7 +20,14 @@ object AppCsv {
         val category: String?,
         val includeInSpending: Boolean,
         val memo: String,
+        /** 파일 안의 id (상계 연결을 옮길 때 쓴다) */
+        val fileId: Long? = null,
+        /** 상계대상: 이 환불·입금이 돌려준 결제의 파일 안 id */
+        val offsetTarget: Long? = null,
     )
+
+    /** 종류 열 값 ↔ Kind */
+    val KIND_LABELS = mapOf(Kind.PAYMENT to "결제", Kind.CANCEL to "환불", Kind.TRANSFER to "출금", Kind.INCOME to "입금")
 
     data class Result(val rows: List<Row>, val skipped: Int)
 
@@ -43,6 +51,9 @@ object AppCsv {
         val iCancel = col("취소됨")
         val iMemo = col("메모")
         val iSource = col("출처")
+        val iId = col("id")
+        val iKind = col("종류")
+        val iOffset = col("상계대상")
 
         var skipped = 0
         val rows = lines.drop(1).mapNotNull { r ->
@@ -55,13 +66,16 @@ object AppCsv {
                 return@mapNotNull null
             }
             val time = runCatching { LocalTime.parse(get(iTime).let { if (it.length == 4) "0$it" else it }) }.getOrNull()
-            val category = get(iCat).ifEmpty { null }
+            val labeled = KIND_LABELS.entries.firstOrNull { it.value == get(iKind) }?.key
             val kind = when {
+                labeled != null -> labeled
                 get(iTransfer) == "Y" -> Kind.TRANSFER
-                signed < 0 && category == Categories.INCOME -> Kind.INCOME
+                signed < 0 && get(iCat) == Categories.INCOME -> Kind.INCOME
                 signed < 0 -> Kind.CANCEL
                 else -> Kind.PAYMENT
             }
+            // 예전 파일의 '입금' 카테고리는 아직 구분 안 한 입금
+            val category = get(iCat).ifEmpty { null }.takeUnless { kind == Kind.INCOME && it == Categories.INCOME }
             val source = Source.entries.firstOrNull { it.label == get(iSource) } ?: Source.MANUAL
             Row(
                 parsed = Parsed(
@@ -77,8 +91,10 @@ object AppCsv {
                 ),
                 merchant = name,
                 category = category,
-                includeInSpending = get(iInclude) != "N",
+                includeInSpending = get(iInclude) != "N" && kind != Kind.INCOME && !MoneyFlow.isFlowCategory(category),
                 memo = get(iMemo),
+                fileId = get(iId).toLongOrNull(),
+                offsetTarget = get(iOffset).toLongOrNull(),
             )
         }
         return Result(rows, skipped)

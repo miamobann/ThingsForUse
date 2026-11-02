@@ -16,7 +16,7 @@ import java.util.concurrent.TimeUnit
  *
  * 한 번 부를 때 하는 일:
  * 1. 앱에서 고친 분류(edits)를 보낸다 → 스크립트가 시트2 '분류 자료'의 건별 대분류에 적는다
- * 2. 앱 내역 전체(rows, CSV와 같은 14개 열)를 보낸다 → 스크립트가 시트1 '내역'을 통째로 다시 쓴다
+ * 2. 앱 내역 전체(rows, CSV와 같은 17개 열)를 보낸다 → 스크립트가 시트1 '내역'을 통째로 다시 쓴다
  * 3. 시트2의 건별 대분류(categories)를 받아 앱 내역에 반영한다 (분석 화면에서 고친 분류)
  *
  * 인터넷이 안 되면 실패로 두고, 다음에 내역이 바뀌거나 앱을 열 때 다시 보낸다. 고친 분류는 보낼 때까지 남겨 둔다.
@@ -55,7 +55,7 @@ object SheetSync {
             put("edits", JSONArray().apply {
                 sentEdits.forEach { (id, c) -> put(JSONObject().put("id", id.toString()).put("category", c)) }
             })
-            put("rows", JSONArray().apply { Export.rows(repo.all()).forEach { put(JSONArray(it)) } })
+            put("rows", JSONArray().apply { Export.rows(repo.all(), Prefs(ctx).cutoffDay).forEach { put(JSONArray(it)) } })
         }
         val result = runCatching { JSONObject(post(url, body.toString())) }
         val error = result.fold(

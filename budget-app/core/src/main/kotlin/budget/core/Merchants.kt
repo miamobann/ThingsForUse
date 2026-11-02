@@ -66,7 +66,7 @@ object Merchants {
 
     fun suggestCategory(raw: String, kind: Kind): String? {
         if (kind == Kind.TRANSFER) return Categories.TRANSFER
-        if (kind == Kind.INCOME) return Categories.INCOME
+        if (kind == Kind.INCOME) return MoneyFlow.defaultIncomeCategory(raw)
         if (isPaymentAgentOnly(raw)) return null
         val k = key(raw)
         return SUGGESTIONS.firstOrNull { (_, words) -> words.any { k.contains(it) } }?.first
@@ -87,7 +87,6 @@ object NotSpending {
     private val CASH = listOf("atm", "cd출금", "현금인출", "자동화기기", "cd/atm")
 
     fun ruleFor(p: Parsed): Rule? {
-        if (p.kind == Kind.INCOME) return Rule(Categories.INCOME, "입금은 지출이 아니에요. 결제와 상계할 수 있어요")
         val k = Merchants.key(p.merchant)
         if (p.source.channel == Channel.BANK) {
             if (CARD_BILL.any { k.contains(it.lowercase()) }) return Rule(Categories.CARD_BILL, "카드대금은 카드 결제로 이미 기록돼요")
@@ -100,6 +99,7 @@ object NotSpending {
 
 object Categories {
     const val CARD_BILL = "카드대금"
+    /** 예전 CSV에서 입금을 표시하던 카테고리 (지금은 MoneyFlow의 구분을 쓴다) */
     const val INCOME = "입금"
     const val CASH_OUT = "현금인출"
     const val TRANSFER = "송금"
