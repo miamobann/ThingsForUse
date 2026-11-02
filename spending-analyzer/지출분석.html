@@ -634,12 +634,38 @@ details summary { cursor: pointer; font-weight: 600; margin: 4px 0; }
     return items;
   }
 
+  // ---------- 가계부 앱용 CSV 내보내기 ----------
+  /** 앱 CSV와 같은 14열. 출처·결제수단은 앱 라벨로, 원래가게명은 카드 쪽 이름 (앱이 나중에 카드 파일과 중복 거를 때 씀) */
+  function appSource(r) {
+    if (r.matchedCard || /네이버페이/.test(r.source) || r.pay === '네이버페이') return '네이버페이 알림';
+    if (/^카드 파일/.test(r.source)) return '카드 파일';
+    return r.source || '직접 입력';
+  }
+  function appPay(r) {
+    if (r.pay === '현대카드(네이버페이)') return '현대카드';
+    return r.pay || (/^카드 파일/.test(r.source) ? '현대카드' : '');
+  }
+  /** items: [{r, cat, include}] → CSV 문자열 (BOM, CRLF) */
+  function toAppCSV(items) {
+    const cell = (v) => { const t = String(v == null ? '' : v); return /[",\r\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
+    const lines = [CSV_COLS.join(',')];
+    for (const { r, cat, include } of items) {
+      lines.push([
+        r.id, r.date, (r.time || '').slice(0, 5), r.amount, r.store, r.cardStore || r.rawStore || r.store,
+        cat || '', appPay(r), r.inst > 1 ? r.inst : '',
+        r.transfer || cat === '송금' ? 'Y' : 'N', include ? 'Y' : 'N', r.canceled ? 'Y' : 'N',
+        r.memo || '', appSource(r),
+      ].map(cell).join(','));
+    }
+    return '﻿' + lines.join('\r\n') + '\r\n';
+  }
+
   const api = {
     DEFAULT_TREE, NOT_SPENDING_CATS, WEEKDAYS,
     displayName, storeKey, isAgentOnly, similarStore, productName, sellerFromMemo, matchRule,
     parseCSV, parseAppCSV, parseFile, parseHyundaiStatement, parseHyundaiRealtime, htmlRows,
     combine, classify, spendAmount, installment, analyze, findRecurring, findDuplicates,
-    dayNum, weekday, addMonths, group, sum, median,
+    dayNum, weekday, addMonths, group, sum, median, toAppCSV,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Core = api;
@@ -1259,6 +1285,8 @@ details summary { cursor: pointer; font-weight: 600; margin: 4px 0; }
       <div class="card"><h2>계산 방법</h2>
         <label><input type="checkbox" id="optTransfer" ${S.opts.excludeTransfer ? 'checked' : ''}> 송금은 지출에서 빼기</label>
         <p class="muted" style="margin:6px 0 0">할부는 결제한 달에 전체 금액으로 세고, 내역 표에 월 금액·남은 금액을 같이 보여줘요.</p></div>
+      <div class="card"><h2>가계부 앱으로 보내기</h2><p class="sub">합쳐서 정리한 내역을 가계부 앱이 읽는 CSV(14열)로 저장해요. 카테고리 칸에는 대분류만 들어가고, 카드+네이버페이로 합친 건은 한 줄로 나가요. 앱의 CSV 가져오기로 넣으면 돼요.</p>
+        <button class="btn" id="appOut" ${D && D.items.length ? '' : 'disabled'}>가계부 앱용 CSV 저장</button></div>
       <div class="card"><h2>백업</h2><p class="sub">분류 기억, 건별 분류, 세부 분류 목록을 파일로 저장해 다른 PC로 옮기거나 되살릴 수 있어요. 불러온 내역은 포함하지 않아요 (CSV를 다시 올리면 돼요). API 키도 넣지 않아요.</p>
         <button class="btn" id="bkOut">백업 파일 저장</button> <button class="btn" id="bkIn">백업 파일 불러오기</button></div>
       <div class="card"><h2>AI 자동 분류</h2><p class="sub">Anthropic API 키를 넣으면 '분류하기'에서 AI 자동 분류 버튼을 쓸 수 있어요. 키는 이 PC의 브라우저에만 저장되고, AI에는 분류 안 된 가게 이름과 분류 목록만 보내요 (금액·날짜는 안 보내요).</p>
@@ -1269,6 +1297,15 @@ details summary { cursor: pointer; font-weight: 600; margin: 4px 0; }
     setupDrop($('#drop2', root), $('#pick2', root));
     root.querySelectorAll('.fdel').forEach((b) => b.onclick = () => { S.files = S.files.filter((f) => f.key !== b.dataset.key); save(); recompute(); render(); });
     $('#optTransfer', root).onchange = (e) => { S.opts.excludeTransfer = e.target.checked; save(); recompute(); render(); };
+    $('#appOut', root).onclick = () => {
+      const items = D.items.map((x) => {
+        const ov = S.overrides[x.r.id] || {};
+        return { r: x.r, cat: x.c.cat, include: ov.exclude ? false : ov.include ? true : x.r.include };
+      });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([C.toAppCSV(items)], { type: 'text/csv' }));
+      a.download = `가계부_가져오기_${todayStr}.csv`; a.click();
+    };
     $('#bkOut', root).onclick = () => {
       const data = { app: 'spending-analyzer', version: 1, savedAt: new Date().toISOString(), memory: S.memory, overrides: S.overrides, tree: S.tree, dismissed: S.dismissed, opts: S.opts, rules: S.rules };
       const a = document.createElement('a');

@@ -98,3 +98,17 @@ test('실시간 내역 시작 하루 전 명세서 결제도 겹치면 합침 (�
   const r = C.parseFile('r.xls', rt([['2026년 10월 02일', '01:09', '마이시큐리티', '600', '777']]));
   assert.equal(C.combine([s, r]).rows.length, 1);
 });
+
+test('가계부 앱용 CSV: 합친 건은 한 줄, 원래가게명은 카드 쪽, 앱 라벨', () => {
+  const r1 = { id: 'n1', date: '2026-10-03', time: '12:30:11', amount: 15000, store: '윗치폼', rawStore: '파이어볼트', cardStore: '네이버파이낸셜', pay: '현대카드(네이버페이)', matchedCard: 'c1', source: '네이버페이내역', inst: 0, transfer: false, include: true, canceled: false, memo: '굿즈, "한정"' };
+  const r2 = { id: 's1', date: '2026-10-04', time: '', amount: -3000, store: '편의점', rawStore: 'GS25', pay: '현대카드', source: '카드 파일(명세서)', inst: 3, transfer: false, include: true, canceled: false, memo: '' };
+  const out = C.toAppCSV([{ r: r1, cat: '여가', include: true }, { r: r2, cat: '식비', include: false }]);
+  const rows = C.parseCSV(out.replace(/^﻿/, ''));
+  assert.equal(rows.length, 3);
+  assert.equal(rows[0].length, 14);
+  assert.deepEqual(rows[1], ['n1', '2026-10-03', '12:30', '15000', '윗치폼', '네이버파이낸셜', '여가', '현대카드', '', 'N', 'Y', 'N', '굿즈, "한정"', '네이버페이 알림']);
+  assert.deepEqual(rows[2], ['s1', '2026-10-04', '', '-3000', '편의점', 'GS25', '식비', '현대카드', '3', 'N', 'N', 'N', '', '카드 파일']);
+  // 다시 읽어도 같은 내용
+  const back = C.parseAppCSV(out.replace(/^﻿/, '')).rows;
+  assert.equal(back[0].amount, 15000); assert.equal(back[1].include, false);
+});

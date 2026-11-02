@@ -612,6 +612,8 @@
       <div class="card"><h2>계산 방법</h2>
         <label><input type="checkbox" id="optTransfer" ${S.opts.excludeTransfer ? 'checked' : ''}> 송금은 지출에서 빼기</label>
         <p class="muted" style="margin:6px 0 0">할부는 결제한 달에 전체 금액으로 세고, 내역 표에 월 금액·남은 금액을 같이 보여줘요.</p></div>
+      <div class="card"><h2>가계부 앱으로 보내기</h2><p class="sub">합쳐서 정리한 내역을 가계부 앱이 읽는 CSV(14열)로 저장해요. 카테고리 칸에는 대분류만 들어가고, 카드+네이버페이로 합친 건은 한 줄로 나가요. 앱의 CSV 가져오기로 넣으면 돼요.</p>
+        <button class="btn" id="appOut" ${D && D.items.length ? '' : 'disabled'}>가계부 앱용 CSV 저장</button></div>
       <div class="card"><h2>백업</h2><p class="sub">분류 기억, 건별 분류, 세부 분류 목록을 파일로 저장해 다른 PC로 옮기거나 되살릴 수 있어요. 불러온 내역은 포함하지 않아요 (CSV를 다시 올리면 돼요). API 키도 넣지 않아요.</p>
         <button class="btn" id="bkOut">백업 파일 저장</button> <button class="btn" id="bkIn">백업 파일 불러오기</button></div>
       <div class="card"><h2>AI 자동 분류</h2><p class="sub">Anthropic API 키를 넣으면 '분류하기'에서 AI 자동 분류 버튼을 쓸 수 있어요. 키는 이 PC의 브라우저에만 저장되고, AI에는 분류 안 된 가게 이름과 분류 목록만 보내요 (금액·날짜는 안 보내요).</p>
@@ -622,6 +624,15 @@
     setupDrop($('#drop2', root), $('#pick2', root));
     root.querySelectorAll('.fdel').forEach((b) => b.onclick = () => { S.files = S.files.filter((f) => f.key !== b.dataset.key); save(); recompute(); render(); });
     $('#optTransfer', root).onchange = (e) => { S.opts.excludeTransfer = e.target.checked; save(); recompute(); render(); };
+    $('#appOut', root).onclick = () => {
+      const items = D.items.map((x) => {
+        const ov = S.overrides[x.r.id] || {};
+        return { r: x.r, cat: x.c.cat, include: ov.exclude ? false : ov.include ? true : x.r.include };
+      });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([C.toAppCSV(items)], { type: 'text/csv' }));
+      a.download = `가계부_가져오기_${todayStr}.csv`; a.click();
+    };
     $('#bkOut', root).onclick = () => {
       const data = { app: 'spending-analyzer', version: 1, savedAt: new Date().toISOString(), memory: S.memory, overrides: S.overrides, tree: S.tree, dismissed: S.dismissed, opts: S.opts, rules: S.rules };
       const a = document.createElement('a');

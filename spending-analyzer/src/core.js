@@ -524,12 +524,38 @@
     return items;
   }
 
+  // ---------- 가계부 앱용 CSV 내보내기 ----------
+  /** 앱 CSV와 같은 14열. 출처·결제수단은 앱 라벨로, 원래가게명은 카드 쪽 이름 (앱이 나중에 카드 파일과 중복 거를 때 씀) */
+  function appSource(r) {
+    if (r.matchedCard || /네이버페이/.test(r.source) || r.pay === '네이버페이') return '네이버페이 알림';
+    if (/^카드 파일/.test(r.source)) return '카드 파일';
+    return r.source || '직접 입력';
+  }
+  function appPay(r) {
+    if (r.pay === '현대카드(네이버페이)') return '현대카드';
+    return r.pay || (/^카드 파일/.test(r.source) ? '현대카드' : '');
+  }
+  /** items: [{r, cat, include}] → CSV 문자열 (BOM, CRLF) */
+  function toAppCSV(items) {
+    const cell = (v) => { const t = String(v == null ? '' : v); return /[",\r\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
+    const lines = [CSV_COLS.join(',')];
+    for (const { r, cat, include } of items) {
+      lines.push([
+        r.id, r.date, (r.time || '').slice(0, 5), r.amount, r.store, r.cardStore || r.rawStore || r.store,
+        cat || '', appPay(r), r.inst > 1 ? r.inst : '',
+        r.transfer || cat === '송금' ? 'Y' : 'N', include ? 'Y' : 'N', r.canceled ? 'Y' : 'N',
+        r.memo || '', appSource(r),
+      ].map(cell).join(','));
+    }
+    return '﻿' + lines.join('\r\n') + '\r\n';
+  }
+
   const api = {
     DEFAULT_TREE, NOT_SPENDING_CATS, WEEKDAYS,
     displayName, storeKey, isAgentOnly, similarStore, productName, sellerFromMemo, matchRule,
     parseCSV, parseAppCSV, parseFile, parseHyundaiStatement, parseHyundaiRealtime, htmlRows,
     combine, classify, spendAmount, installment, analyze, findRecurring, findDuplicates,
-    dayNum, weekday, addMonths, group, sum, median,
+    dayNum, weekday, addMonths, group, sum, median, toAppCSV,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Core = api;
