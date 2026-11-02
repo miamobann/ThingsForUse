@@ -93,6 +93,8 @@ class MainActivity : FragmentActivity() {
 
     override fun onResume() {
         super.onResume()
+        // 분석 화면에서 고친 분류를 받아오려고 열 때마다 한 번 맞춘다
+        budget.app.data.SheetSync.schedule(this, 1)
         if (Prefs(this).lockEnabled && !unlocked) authenticate()
     }
 

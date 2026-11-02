@@ -46,6 +46,8 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import budget.app.data.AutoSaveLinks
+import budget.app.data.SheetSync
+import budget.app.data.SyncSettings
 import budget.app.data.Export
 import budget.app.data.Prefs
 import budget.app.data.Repository
@@ -173,6 +175,9 @@ fun SettingsScreen(go: (Screen) -> Unit) {
             }
         }
 
+        SectionTitle("구글 시트 연동")
+        SheetSyncPanel()
+
         SectionTitle("구글 드라이브 저장")
         Panel {
             Text(
@@ -295,6 +300,53 @@ fun UnparsedScreen(onBack: () -> Unit) {
                     Text(u.text, fontSize = 14.sp, lineHeight = 20.sp)
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun SheetSyncPanel() {
+    val ctx = LocalContext.current
+    val sync = remember { SyncSettings(ctx) }
+    val scope = rememberCoroutineScope()
+    var url by remember { mutableStateOf(sync.url ?: "") }
+    var key by remember { mutableStateOf(sync.key) }
+    var result by remember { mutableStateOf(sync.lastResult) }
+    var busy by remember { mutableStateOf(false) }
+    Panel {
+        Text(
+            "구글 시트의 앱스 스크립트 웹 앱 주소와 연결 비밀번호를 넣으면, 내역이 바뀔 때마다 시트 '내역'에 올리고 " +
+                "분석 화면에서 고친 분류를 받아와요. 인터넷이 안 될 때 바뀐 건 다음에 연결되면 보내요.",
+            fontSize = 13.sp, color = C.sub, lineHeight = 18.sp,
+        )
+        OutlinedTextField(
+            url, { url = it.trim() }, Modifier.fillMaxWidth(),
+            label = { Text("웹 앱 주소 (https://script.google.com/…/exec)") }, singleLine = true,
+        )
+        OutlinedTextField(
+            key, { key = it }, Modifier.fillMaxWidth(), label = { Text("연결 비밀번호") }, singleLine = true,
+            visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+        )
+        Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(if (busy) "보내는 중…" else result ?: "아직 연결 안 함", fontSize = 12.sp, color = C.sub, modifier = Modifier.weight(1f))
+            SmallButton(if (sync.configured) "지금 동기화" else "저장하고 연결") {
+                if (busy) return@SmallButton
+                sync.url = url
+                sync.key = key
+                if (!sync.configured) { result = "주소와 비밀번호를 둘 다 넣어 주세요"; return@SmallButton }
+                busy = true
+                scope.launch {
+                    withContext(Dispatchers.IO) { SheetSync.syncNow(ctx) }
+                    result = sync.lastResult
+                    busy = false
+                }
+            }
+        }
+        if (sync.url != null) {
+            Text(
+                "연결 끊기", fontSize = 13.sp, color = C.warn,
+                modifier = Modifier.clickable { sync.url = null; url = ""; result = null }.padding(vertical = 6.dp),
+            )
         }
     }
 }

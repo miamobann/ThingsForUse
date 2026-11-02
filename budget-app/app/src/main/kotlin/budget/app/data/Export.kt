@@ -42,9 +42,14 @@ object Export {
     fun csv(txs: List<Tx>): String {
         val sb = StringBuilder("﻿")
         sb.append(CSV_HEADER.joinToString(",")).append("\r\n")
-        for (t in txs.sortedWith(compareBy({ it.time }, { it.id }))) {
+        for (row in rows(txs)) sb.append(row.joinToString(",") { cell(it) }).append("\r\n")
+        return sb.toString()
+    }
+
+    /** CSV·시트 공통: 한 건을 14개 열로 */
+    fun rows(txs: List<Tx>): List<List<String>> = txs.sortedWith(compareBy({ it.time }, { it.id })).map { t ->
             val amount = if (t.kind == Kind.CANCEL || t.kind == Kind.INCOME) -t.amount else t.amount
-            val row = listOf(
+            listOf(
                 t.id.toString(),
                 t.time.format(DATE),
                 if (t.timeKnown) t.time.format(TIME) else "",
@@ -60,10 +65,7 @@ object Export {
                 t.memo,
                 t.source.label,
             )
-            sb.append(row.joinToString(",") { cell(it) }).append("\r\n")
         }
-        return sb.toString()
-    }
 
     private fun cell(s: String): String =
         if (s.any { it == ',' || it == '"' || it == '\n' || it == '\r' }) "\"" + s.replace("\"", "\"\"") + "\"" else s
@@ -101,9 +103,9 @@ object Export {
             repo.deleteAll()
             for (i in 0 until arr.length()) {
                 val t = arr.getJSONObject(i)
-                repo.insert(
-                    Tx(
-                        id = 0,
+                val id = t.optLong("id", 0)
+                val tx = Tx(
+                        id = id,
                         time = LocalDateTime.parse(t.getString("time")),
                         timeKnown = t.optBoolean("timeKnown", true),
                         amount = t.getLong("amount"),
@@ -120,7 +122,7 @@ object Export {
                         memo = t.optString("memo"),
                         raw = t.optString("raw"),
                     )
-                )
+                if (id > 0) repo.insertWithId(tx) else repo.insert(tx)
             }
             val rules = o.optJSONObject("rules")
             rules?.keys()?.forEach { k -> repo.putRule(k, rules.getString(k)) }

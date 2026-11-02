@@ -7,7 +7,8 @@
     <!-- 예산 알림, 새 가게 분류 알림 -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
-    <!-- 이 앱은 인터넷 권한이 없다. 결제 내역이 폰 밖으로 나가는 길은 안드로이드 자체 백업과 직접 내보낸 파일뿐이다. -->
+    <!-- 구글 시트 연동(설정에서 Min이 직접 연결한 앱스 스크립트 주소로만 보냄)에 쓴다 -->
+    <uses-permission android:name="android.permission.INTERNET" />
 
     <application
         android:name=".BudgetApp"

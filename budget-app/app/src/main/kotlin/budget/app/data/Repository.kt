@@ -71,8 +71,19 @@ class Repository private constructor(ctx: Context) {
 
     fun insert(t: Tx): Long = db.insert("tx", null, values(t))
 
-    fun update(t: Tx) {
+    /** 백업 복원용: id를 그대로 살려서 넣는다 (시트의 분류 자료가 id에 붙어 있어서) */
+    fun insertWithId(t: Tx): Long =
+        db.insertWithOnConflict("tx", null, values(t).apply { put("id", t.id) }, SQLiteDatabase.CONFLICT_REPLACE)
+
+    /** 앱 안에서 카테고리가 바뀌면 부른다: 시트로 보낼 분류 수정 기록 */
+    var onCategoryEdited: ((Long, String?) -> Unit)? = null
+
+    /** @param fromSync 시트에서 받아온 분류를 넣을 때는 다시 시트로 보내지 않는다 */
+    fun update(t: Tx, fromSync: Boolean = false) {
+        val hook = onCategoryEdited
+        val before = if (hook != null && !fromSync) byId(t.id)?.category else null
         db.update("tx", values(t), "id = ?", arrayOf(t.id.toString()))
+        if (hook != null && !fromSync && before != t.category) hook(t.id, t.category)
     }
 
     fun delete(id: Long) {
