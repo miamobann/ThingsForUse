@@ -52,6 +52,14 @@
     return hit;
   }
   function samePG(a, b) { const x = pgOf(a); return x >= 0 && x === pgOf(b); }
+  // 네이버페이 메모 "스토어 - 스텔라이브의 상품명 / 상태:..." 에서 실제 판매자 이름 꺼내기
+  function productName(memo) { return String(memo || '').split(' / ')[0].trim(); }
+  function sellerFromMemo(memo) {
+    const p = productName(memo);
+    let m = /^스토어 - (.+?)의 /.exec(p); if (m) return m[1].trim();
+    m = /^멤버십 - (\S+)/.exec(p); if (m) return m[1].trim();
+    return '';
+  }
   function similarStore(a, b) {
     const ka = storeKey(a), kb = storeKey(b);
     if (!ka || !kb) return false;
@@ -116,11 +124,15 @@
       const date = get(r, '날짜');
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { problems.push(`${n + 2}번째 줄: 날짜를 읽지 못함`); return; }
       if (amount === null) problems.push(`${n + 2}번째 줄 (${date} ${get(r, '가게명')}): 금액이 비어 있어 0원으로 둠`);
+      // 가게 칸에 결제대행사 이름만 있으면 메모의 판매자 이름을 가게로 쓴다
+      let store = get(r, '가게명') || get(r, '원래가게명');
+      const seller = isAgentOnly(store) ? sellerFromMemo(get(r, '메모')) : '';
+      if (seller) store = seller;
       out.push({
         id: get(r, 'id') || `csv-${date}-${n}`,
         date, time: get(r, '시각'),
         amount: amount || 0,
-        store: get(r, '가게명') || get(r, '원래가게명'),
+        store,
         rawStore: get(r, '원래가게명') || get(r, '가게명'),
         cat: get(r, '카테고리'),
         pay: get(r, '결제수단'),
@@ -398,12 +410,22 @@
     const ov = state.overrides[r.id];
     const agent = isAgentOnly(r.store);
     const k = storeKey(r.store);
-    const mem = agent ? null : state.memory[k];
-    let cat = (ov && ov.cat) || r.cat || (mem && mem.cat) || '';
+    let mem = agent ? null : state.memory[k];
+    if (!mem && agent) { const sk = storeKey(sellerFromMemo(r.memo)); if (sk) mem = state.memory[sk] || null; }
+    // 단어 규칙: 가게·메모(상품명)에 그 단어가 들어 있으면 (기억·건별 분류가 없을 때만)
+    const rule = !mem && !(ov && ov.cat) ? matchRule(r, state.rules) : null;
+    const src = mem || rule;
+    let cat = (ov && ov.cat) || r.cat || (src && src.cat) || '';
     let sub = '';
     if (ov && ov.sub && (!ov.cat || ov.cat === cat)) sub = ov.sub;
-    else if (mem && mem.sub && mem.cat === cat) sub = mem.sub;
-    return { cat, sub, agent, key: k };
+    else if (src && src.sub && src.cat === cat) sub = src.sub;
+    return { cat, sub, agent, key: k, byRule: !!(rule && !(ov && ov.cat)) };
+  }
+
+  function matchRule(r, rules) {
+    if (!rules || !rules.length) return null;
+    const text = `${r.store} ${productName(r.memo)}`.toLowerCase().replace(/\s/g, '');
+    return rules.find((x) => x.kw && text.includes(String(x.kw).toLowerCase().replace(/\s/g, ''))) || null;
   }
 
   /** 합계에 넣을 금액. 취소·지출 아님·지출 제외는 0. 송금 제외 옵션. */
@@ -504,7 +526,7 @@
 
   const api = {
     DEFAULT_TREE, NOT_SPENDING_CATS, WEEKDAYS,
-    displayName, storeKey, isAgentOnly, similarStore,
+    displayName, storeKey, isAgentOnly, similarStore, productName, sellerFromMemo, matchRule,
     parseCSV, parseAppCSV, parseFile, parseHyundaiStatement, parseHyundaiRealtime, htmlRows,
     combine, classify, spendAmount, installment, analyze, findRecurring, findDuplicates,
     dayNum, weekday, addMonths, group, sum, median,
