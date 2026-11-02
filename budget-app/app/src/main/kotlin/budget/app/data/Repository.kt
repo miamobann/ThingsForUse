@@ -9,6 +9,7 @@ import budget.core.Kind
 import budget.core.Merchants
 import budget.core.MoneyFlow
 import budget.core.Offset
+import budget.core.Rules
 import budget.core.Source
 import budget.core.Tx
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -145,22 +146,27 @@ class Repository private constructor(ctx: Context) {
     /**
      * 카테고리를 정한다. remember면 같은 가게(입금이면 같은 보낸 사람)의 다음 기록부터 자동으로 쓰고,
      * 아직 분류 안 된 같은 가게 기록도 한꺼번에 채운다. 수입·저축 등을 고르면 지출에서 빠진다.
+     * byAmount면 이 가게의 같은 금액에만 기억한다(치지직 4,900원 = 구독처럼). 금액 규칙이 가게 규칙보다 먼저.
      * 결제대행사 이름만 있는 가게(네이버파이낸셜 등)는 기억하지 않는다.
      */
-    fun setCategory(t: Tx, category: String, remember: Boolean) {
+    fun setCategory(t: Tx, category: String, remember: Boolean, byAmount: Boolean = false) {
         update(MoneyFlow.withCategory(t, category))
         if (remember && !Merchants.isPaymentAgentOnly(t.merchant)) {
             val key = MoneyFlow.ruleKey(t.merchant, t.kind)
-            putRule(key, category)
-            uncategorized().filter { MoneyFlow.ruleKey(it.merchant, it.kind) == key }.forEach { update(MoneyFlow.withCategory(it, category)) }
+            putRule(if (byAmount) Rules.amountKey(key, t.amount) else key, category)
+            uncategorized().filter { MoneyFlow.ruleKey(it.merchant, it.kind) == key && (!byAmount || it.amount == t.amount) }
+                .forEach { update(MoneyFlow.withCategory(it, ruleFor(it.merchant, it.kind, it.amount) ?: category)) }
         }
     }
 
-    fun ruleFor(merchant: String, kind: Kind): String? {
+    /** 금액 규칙 → 가게 규칙 순서로 찾는다 */
+    fun ruleFor(merchant: String, kind: Kind, amount: Long? = null): String? {
         if (Merchants.isPaymentAgentOnly(merchant)) return null
-        db.rawQuery("SELECT category FROM rule WHERE merchant_key = ?", arrayOf(MoneyFlow.ruleKey(merchant, kind))).use { c ->
-            return if (c.moveToFirst()) c.getString(0) else null
+        val keys = if (amount != null) Rules.lookupKeys(merchant, kind, amount) else listOf(MoneyFlow.ruleKey(merchant, kind))
+        for (k in keys) {
+            db.rawQuery("SELECT category FROM rule WHERE merchant_key = ?", arrayOf(k)).use { c -> if (c.moveToFirst()) return c.getString(0) }
         }
+        return null
     }
 
     fun rules(): Map<String, String> {

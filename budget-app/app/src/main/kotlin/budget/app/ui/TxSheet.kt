@@ -68,6 +68,7 @@ private fun TxEditor(t: Tx, onClose: () -> Unit) {
     val agentOnly = Merchants.isPaymentAgentOnly(t.merchant)
     var category by remember(t.id) { mutableStateOf(t.category) }
     var keepRule by remember(t.id) { mutableStateOf(!agentOnly) }
+    var byAmount by remember(t.id) { mutableStateOf(false) }
     var include by remember(t.id) { mutableStateOf(t.includeInSpending) }
     var memo by remember(t.id) { mutableStateOf(t.memo) }
     var newCategory by remember { mutableStateOf<String?>(null) }
@@ -160,6 +161,12 @@ private fun TxEditor(t: Tx, onClose: () -> Unit) {
                 Checkbox(keepRule, { keepRule = it })
                 Text(if (income) "다음부터 이 사람이 보낸 돈은 자동으로 같은 구분" else "다음부터 이 가게는 자동으로 같은 카테고리로 분류", fontSize = 14.sp)
             }
+            if (keepRule && !income) {
+                Row(Modifier.fillMaxWidth().padding(start = 24.dp).clickable { byAmount = !byAmount }, verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(byAmount, { byAmount = it })
+                    Text("${won(t.amount)}일 때만 (같은 가게라도 금액마다 분류가 다르면)", fontSize = 13.sp)
+                }
+            }
         }
 
         if (!income) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -183,7 +190,7 @@ private fun TxEditor(t: Tx, onClose: () -> Unit) {
                 repo.writer.execute {
                     val updated = t.copy(includeInSpending = include, memo = memo)
                     repo.update(updated)
-                    if (chosen != null && (chosen != t.category || keepRule)) repo.setCategory(updated, chosen, keepRule && !agentOnly)
+                    if (chosen != null && (chosen != t.category || keepRule)) repo.setCategory(updated, chosen, keepRule && !agentOnly, byAmount)
                     repo.changed()
                 }
                 onClose()

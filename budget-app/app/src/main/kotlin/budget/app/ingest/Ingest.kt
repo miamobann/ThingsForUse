@@ -20,6 +20,7 @@ import budget.core.Categories
 import budget.core.Matcher
 import budget.core.Merchants
 import budget.core.MoneyFlow
+import budget.core.Rules
 import budget.core.Kind
 import budget.app.data.Summary
 import budget.core.NaverPayParser
@@ -182,11 +183,6 @@ object Ingest {
                     added++
                     row.fileId?.let { idMap[it] = id }
                     row.offsetTarget?.let { wantsLink += id to it }
-                    val c = row.category
-                    val kind = row.parsed.kind
-                    if (c != null && (row.includeInSpending || MoneyFlow.isFlowCategory(c)) && c != Categories.TRANSFER &&
-                        !Merchants.isPaymentAgentOnly(row.merchant) && repo.ruleFor(row.merchant, kind) == null
-                    ) repo.putRule(MoneyFlow.ruleKey(row.merchant, kind), c)
                 } else {
                     if (d is Matcher.Decision.Duplicate) {
                         row.fileId?.let { idMap[it] = d.existing.id }
@@ -195,6 +191,13 @@ object Ingest {
                     } else apply(repo, p, d)
                 }
             }
+            // 파일의 분류에서 가게 규칙·금액 규칙을 배운다 (이미 있는 규칙은 그대로)
+            val existing = repo.rules()
+            Rules.learn(rows.mapNotNull { r ->
+                val c = r.category ?: return@mapNotNull null
+                if (c == Categories.TRANSFER || !(r.includeInSpending || MoneyFlow.isFlowCategory(c))) return@mapNotNull null
+                Rules.Seen(r.merchant, r.parsed.kind, r.parsed.amount, c)
+            }).forEach { (k, c) -> if (k !in existing) repo.putRule(k, c) }
             // 파일에 있던 상계 연결을 앱 id로 옮긴다
             for ((id, target) in wantsLink) {
                 val to = idMap[target] ?: continue
@@ -208,7 +211,7 @@ object Ingest {
     /** 결정대로 DB를 바꾸고, 새로 생기거나 이름이 바뀐 거래를 돌려준다 */
     private fun apply(repo: Repository, p: Parsed, d: Matcher.Decision): Tx? = when (d) {
         Matcher.Decision.Insert -> {
-            val category = repo.ruleFor(p.merchant, p.kind) ?: Merchants.suggestCategory(p.merchant, p.kind)
+            val category = repo.ruleFor(p.merchant, p.kind, p.amount) ?: Merchants.suggestCategory(p.merchant, p.kind)
             val tx = p.toTx(0, category)
             tx.copy(id = repo.insert(tx))
         }
@@ -222,7 +225,7 @@ object Ingest {
             // 카드에는 대행사 이름만 있었으니 네이버페이의 실제 가게 이름으로 바꾸고 분류도 다시 해 본다
             val name = Merchants.displayName(d.merchant)
             val category = d.existing.category.takeUnless { Merchants.isPaymentAgentOnly(d.existing.merchant) }
-                ?: repo.ruleFor(name, d.existing.kind) ?: Merchants.suggestCategory(name, d.existing.kind)
+                ?: repo.ruleFor(name, d.existing.kind, d.existing.amount) ?: Merchants.suggestCategory(name, d.existing.kind)
             val t = d.existing.copy(merchant = name, linkedNaverPay = true, category = category)
             repo.update(t)
             t

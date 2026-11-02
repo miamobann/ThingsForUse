@@ -64,3 +64,22 @@ class MoneyFlowTest {
         assertFalse(save.includeInSpending)
     }
 }
+
+class RulesTest {
+    @Test
+    fun learnsAmountSpecificRules() {
+        val seen = listOf(
+            Rules.Seen("치지직", Kind.PAYMENT, 4_900, "구독"),
+            Rules.Seen("치지직", Kind.PAYMENT, 4_900, "구독"),
+            Rules.Seen("치지직", Kind.PAYMENT, 10_000, "후원"),
+            Rules.Seen("치지직", Kind.PAYMENT, 3_000, "후원"),
+            Rules.Seen("치지직", Kind.PAYMENT, 5_000, "후원"),
+            Rules.Seen("네이버파이낸셜", Kind.PAYMENT, 1_000, "쇼핑"),
+        )
+        val r = Rules.learn(seen)
+        assertEquals("후원", r["치지직"])
+        assertEquals("구독", r["치지직@4900"])
+        assertEquals(2, r.size)
+        assertEquals(listOf("치지직@4900", "치지직"), Rules.lookupKeys("치지직", Kind.PAYMENT, 4_900))
+    }
+}
