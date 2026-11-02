@@ -68,7 +68,33 @@ object Merchants {
     }
 }
 
+/**
+ * 지출이 아닌 돈의 이동을 기본으로 지출에서 빼는 규칙.
+ * - 카드대금: 카드 결제는 이미 한 건씩 기록됐으니, 계좌에서 카드값이 빠져나가는 건 이중 기록이다.
+ * - 현금인출: 뽑은 현금은 쓸 때 직접 입력하니 인출 자체는 지출이 아니다.
+ * - 가승인: 택시·주유 등에서 먼저 잡았다가 실제 금액으로 다시 결제되는 임시 승인.
+ * 사용자가 내역을 눌러 '지출에 포함'을 다시 켤 수 있다.
+ */
+object NotSpending {
+    data class Rule(val category: String, val reason: String)
+
+    private val CARD_BILL = listOf("현대카드", "카드대금", "카드결제", "현대카드결제")
+    private val CASH = listOf("atm", "cd출금", "현금인출", "자동화기기", "cd/atm")
+
+    fun ruleFor(p: Parsed): Rule? {
+        val k = Merchants.key(p.merchant)
+        if (p.source.channel == Channel.BANK) {
+            if (CARD_BILL.any { k.contains(it.lowercase()) }) return Rule(Categories.CARD_BILL, "카드대금은 카드 결제로 이미 기록돼요")
+            if (CASH.any { k.contains(it.replace("/", "")) }) return Rule(Categories.CASH_OUT, "현금은 쓸 때 직접 입력해요")
+        }
+        if (p.source.channel == Channel.CARD && k.contains("가승인")) return Rule("교통", "가승인은 실제 결제가 따로 와요")
+        return null
+    }
+}
+
 object Categories {
+    const val CARD_BILL = "카드대금"
+    const val CASH_OUT = "현금인출"
     const val TRANSFER = "송금"
     const val UNCATEGORIZED = "미분류"
     val DEFAULT = listOf("식비", "카페·간식", "교통", "쇼핑", "구독", "여가", "생활", "의료", TRANSFER, "기타")

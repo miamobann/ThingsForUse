@@ -17,14 +17,20 @@ object Matcher {
         /** 새 거래로 저장 */
         data object Insert : Decision
 
-        /** 이미 있는 거래. 승인번호처럼 비어 있던 정보만 채운다. */
-        data class Duplicate(val existing: Tx, val approvalNo: String? = null) : Decision
+        /**
+         * 이미 있는 거래. 승인번호처럼 비어 있던 정보만 채운다.
+         * amount가 있으면 그 금액으로 고친다 (해외결제·가승인처럼 청구 금액이 알림과 다를 때 파일 쪽이 정확).
+         */
+        data class Duplicate(val existing: Tx, val approvalNo: String? = null, val amount: Long? = null) : Decision
 
         /** 카드 결제에 네이버페이 알림의 실제 가게 이름을 붙인다 */
         data class AttachNaverPay(val existing: Tx, val merchant: String) : Decision
 
-        /** 네이버페이 알림이 먼저 와 있던 결제에 카드 쪽 정보를 붙인다 */
-        data class AttachCard(val existing: Tx, val cardMerchant: String, val source: Source, val approvalNo: String?) : Decision
+        /**
+         * 네이버페이 알림이 먼저 와 있던 결제에 카드 쪽 정보를 붙인다.
+         * 포인트를 섞어 냈으면 카드 금액이 더 작은데, 실제로 나간 돈인 카드 금액으로 고친다.
+         */
+        data class AttachCard(val existing: Tx, val cardMerchant: String, val source: Source, val approvalNo: String?, val amount: Long) : Decision
 
         /** 기존 결제를 취소 처리 */
         data class Cancel(val target: Tx) : Decision
@@ -57,6 +63,11 @@ object Matcher {
             Channel.NAVERPAY -> {
                 sameAmount.firstOrNull { it.source.channel == Channel.CARD && !it.linkedNaverPay }
                     ?.let { return Decision.AttachNaverPay(it, p.merchant) }
+                // 포인트+카드로 나눠 낸 결제: 카드에는 네이버 대행사 이름으로 더 작은 금액이 찍힌다
+                pool.filter {
+                    it.source.channel == Channel.CARD && !it.linkedNaverPay && it.kind == Kind.PAYMENT &&
+                        it.amount < p.amount && isNaverAgent(it.originalMerchant) && close(it, p) && it.timeKnown
+                }.minByOrNull { minutesApart(it, p) }?.let { return Decision.AttachNaverPay(it, p.merchant) }
                 sameAmount.firstOrNull { it.source == Source.NAVERPAY && it.merchant == p.merchant }
                     ?.let { return Decision.Duplicate(it) }
             }
@@ -75,7 +86,23 @@ object Matcher {
                         ?.let { return Decision.Duplicate(it, p.approvalNo) }
                 }
                 sameAmount.firstOrNull { it.source == Source.NAVERPAY }
-                    ?.let { return Decision.AttachCard(it, p.merchant, p.source, p.approvalNo) }
+                    ?.let { return Decision.AttachCard(it, p.merchant, p.source, p.approvalNo, p.amount) }
+                if (isNaverAgent(p.merchant) && p.timeKnown) {
+                    pool.filter { it.source == Source.NAVERPAY && !it.linkedNaverPay && it.amount > p.amount && close(it, p) }
+                        .minByOrNull { minutesApart(it, p) }
+                        ?.let { return Decision.AttachCard(it, p.merchant, p.source, p.approvalNo, p.amount) }
+                }
+                // 해외결제·주유 등: 알림 금액과 청구(파일) 금액이 조금 다를 수 있다. 같은 가게·같은 날·10% 이내면 같은 결제.
+                pool.filter {
+                    it.source.channel == Channel.CARD && (it.source == Source.CARD_FILE) != (p.source == Source.CARD_FILE) &&
+                        it.kind == Kind.PAYMENT &&
+                        it.approvalNo == null && it.time.toLocalDate() == p.time.toLocalDate() &&
+                        (Merchants.similar(it.originalMerchant, p.merchant)) &&
+                        kotlin.math.abs(it.amount - p.amount) * 10 <= maxOf(it.amount, p.amount)
+                }.minByOrNull { kotlin.math.abs(it.amount - p.amount) }?.let {
+                    // 파일 금액이 실제 청구액이라 그쪽으로 맞춘다
+                    return Decision.Duplicate(it, p.approvalNo, if (p.source == Source.CARD_FILE) p.amount else null)
+                }
             }
             Channel.BANK -> {
                 sameAmount.firstOrNull { it.source.channel == Channel.BANK && it.source != p.source }
@@ -112,6 +139,8 @@ object Matcher {
             .maxByOrNull { it.time }
         return if (target != null) Decision.Cancel(target) else Decision.Insert
     }
+
+    private fun isNaverAgent(name: String): Boolean = Merchants.key(name).let { it.contains("네이버파이낸셜") || it.contains("네이버페이") }
 
     private fun merchantMatches(t: Tx, p: Parsed): Boolean =
         Merchants.similar(t.originalMerchant, p.merchant) || Merchants.similar(t.merchant, p.merchant) ||

@@ -145,7 +145,9 @@ object Ingest {
             tx.copy(id = repo.insert(tx))
         }
         is Matcher.Decision.Duplicate -> {
-            if (d.approvalNo != null && d.existing.approvalNo == null) repo.update(d.existing.copy(approvalNo = d.approvalNo))
+            if ((d.approvalNo != null && d.existing.approvalNo == null) || d.amount != null) {
+                repo.update(d.existing.copy(approvalNo = d.existing.approvalNo ?: d.approvalNo, amount = d.amount ?: d.existing.amount))
+            }
             null
         }
         is Matcher.Decision.AttachNaverPay -> {
@@ -160,8 +162,9 @@ object Ingest {
         is Matcher.Decision.AttachCard -> {
             repo.update(
                 d.existing.copy(
-                    originalMerchant = d.cardMerchant, linkedNaverPay = true,
+                    originalMerchant = d.cardMerchant, linkedNaverPay = true, amount = d.amount,
                     approvalNo = d.approvalNo ?: d.existing.approvalNo,
+                    memo = if (d.amount < d.existing.amount) "네이버페이 포인트 ${d.existing.amount - d.amount}원 사용" else d.existing.memo,
                 )
             )
             null

@@ -44,17 +44,21 @@ object ImportPreview {
     }
 }
 
-fun Parsed.toTx(id: Long, category: String?): Tx = Tx(
+fun Parsed.toTx(id: Long, category: String?): Tx {
+    val notSpending = NotSpending.ruleFor(this)
+    return Tx(
     id = id,
     time = time,
     timeKnown = timeKnown,
     amount = amount,
     merchant = Merchants.displayName(merchant),
     originalMerchant = merchant,
-    category = category,
+    category = notSpending?.category ?: category,
+    includeInSpending = notSpending == null,
     source = source,
     kind = kind,
     approvalNo = approvalNo,
     installmentMonths = installmentMonths,
     raw = raw,
-)
+    )
+}
