@@ -2,7 +2,7 @@
  * 지출 분석 화면 (앱스 스크립트 웹 앱).
  * 가계부 앱의 Sync.gs 와 같은 프로젝트에 넣는다. 시트 이름·열은 Sync.gs 의 SYNC_* 값을 같이 쓴다.
  *  - doGet: 분석 화면(Index.html)을 띄운다. 웹 앱은 "나로 실행"이라 시트는 내 권한으로 읽고 쓴다.
- *  - 화면이 부르는 함수는 모두 sa 로 시작한다 (Sync.gs 의 doPost·setSyncKey·hasSyncKey·sync*_ 와 겹치지 않게).
+ *  - 화면이 부르는 함수는 모두 sa 로 시작한다 (Sync.gs 의 doPost·setSyncKey_·hasSyncKey_·sync*_ 와 겹치지 않게).
  *
  * 액세스가 "모든 사용자"여도 이 화면을 연 사람이 시트를 읽을 수 있으니, 웹 앱 주소는 남에게 알려 주지 않는다.
  * 화면 함수는 소유자 본인만 쓰도록 막아 둔다 (아래 saOwner_).
@@ -85,10 +85,10 @@ function saPutMeta(puts, dels) {
   }
 }
 
-/** 앱 연결 비밀번호 정하기 (Sync.gs 의 setSyncKey 를 주인 확인 뒤 부른다) */
+/** 앱 연결 비밀번호 정하기 (Sync.gs 의 setSyncKey_ 를 주인 확인 뒤 부른다) */
 function saSetSyncKey(key) {
   saOwner_();
-  return setSyncKey(key);
+  return setSyncKey_(key);
 }
 
 /** AI 키: 스크립트 속성 ANTHROPIC_KEY. 빈 값이면 지운다. */
