@@ -426,7 +426,9 @@
     if (ov && ov.sub && (!ov.cat || ov.cat === cat)) sub = ov.sub;
     else if (rule && rule.sub && rule.cat === cat) sub = rule.sub;
     else if (mem && mem.sub && mem.cat === cat) sub = mem.sub;
-    return { cat, sub, agent, key: k, byRule: !!(rule && rule.cat === cat && !(ov && ov.cat)) };
+    // 세부를 일부러 비워 둔 것도 정한 것으로 (예: 가게 기억이 '여가 · 세부 없음')
+    const decided = !!sub || !!(ov && ov.cat) || !!(rule && rule.cat === cat) || !!(mem && mem.cat === cat);
+    return { cat, sub, agent, key: k, decided, byRule: !!(rule && rule.cat === cat && !(ov && ov.cat)) };
   }
 
   function matchRule(r, rules) {

@@ -104,6 +104,7 @@ details summary { cursor: pointer; font-weight: 600; margin: 4px 0; }
 .note { background: var(--surface-2); border-radius: 8px; padding: 10px 12px; font-size: 13px; color: var(--text-2); }
 a.estore { color: inherit; text-decoration: none; border-bottom: 1px dotted var(--muted); }
 a.estore:hover { color: var(--accent); border-bottom-color: var(--accent); }
+.grid2 > * { min-width: 0; }
 </style>
 </head>
 <body>
@@ -538,7 +539,9 @@ a.estore:hover { color: var(--accent); border-bottom-color: var(--accent); }
     if (ov && ov.sub && (!ov.cat || ov.cat === cat)) sub = ov.sub;
     else if (rule && rule.sub && rule.cat === cat) sub = rule.sub;
     else if (mem && mem.sub && mem.cat === cat) sub = mem.sub;
-    return { cat, sub, agent, key: k, byRule: !!(rule && rule.cat === cat && !(ov && ov.cat)) };
+    // 세부를 일부러 비워 둔 것도 정한 것으로 (예: 가게 기억이 '여가 · 세부 없음')
+    const decided = !!sub || !!(ov && ov.cat) || !!(rule && rule.cat === cat) || !!(mem && mem.cat === cat);
+    return { cat, sub, agent, key: k, decided, byRule: !!(rule && rule.cat === cat && !(ov && ov.cat)) };
   }
 
   function matchRule(r, rules) {
@@ -1099,7 +1102,7 @@ a.estore:hover { color: var(--accent); border-bottom-color: var(--accent); }
     const recurring = C.findRecurring(D.items.map((x) => ({ r: x.r, c: { ...x.c, cat: x.cat }, amt: x.amt })), todayStr);
     const activeFixed = recurring.filter((r) => r.active);
     const uncat = spend.filter((x) => x.cat === UNCAT && x.amt > 0);
-    const nosub = spend.filter((x) => x.cat !== UNCAT && !x.c.sub && x.amt > 0);
+    const nosub = spend.filter((x) => x.cat !== UNCAT && !x.c.decided && x.amt > 0);
 
     // 세부 분류
     const byCat = [...C.group(spend, (x) => x.cat)].map(([cat, l]) => ({ cat, l, v: C.sum(l.map((x) => x.amt)) })).sort((a, b) => b.v - a.v);
@@ -1237,7 +1240,7 @@ a.estore:hover { color: var(--accent); border-bottom-color: var(--accent); }
     if (t.sub) list = list.filter((x) => x.sub === t.sub);
     if (t.pay) list = list.filter((x) => x.r.pay === t.pay);
     if (t.src) list = list.filter((x) => x.r.source === t.src);
-    if (t.uncat) list = list.filter((x) => x.cat === UNCAT || !x.c.sub);
+    if (t.uncat) list = list.filter((x) => x.cat === UNCAT || !x.c.decided);
     if (!t.showOff) list = list.filter((x) => x.amt > 0);
     if (t.q) { const q = t.q.toLowerCase(); list = list.filter((x) => `${x.r.store} ${x.r.rawStore} ${x.r.memo}`.toLowerCase().includes(q)); }
     const key = { date: (x) => x.r.date + (x.r.time || ''), amount: (x) => x.r.amount, store: (x) => x.r.store, cat: (x) => `${x.cat}${x.sub}` }[t.sort];
@@ -1372,7 +1375,7 @@ a.estore:hover { color: var(--accent); border-bottom-color: var(--accent); }
     const agentRows = [];
     for (const x of D.items) {
       if (x.r.amount <= 0 || C.NOT_SPENDING_CATS.includes(x.r.cat) || x.r.canceled || !x.r.include) continue;
-      if (x.c.cat && x.c.sub) continue;
+      if (x.c.cat && x.c.decided) continue;
       if (x.c.agent) { agentRows.push(x); continue; }
       if (!groups.has(x.c.key)) groups.set(x.c.key, { key: x.c.key, store: x.r.store, list: [], cat: x.c.cat });
       groups.get(x.c.key).list.push(x);
@@ -1516,8 +1519,10 @@ a.estore:hover { color: var(--accent); border-bottom-color: var(--accent); }
     const cardRows = D.rows.filter((r) => /^카드 파일/.test(r.source));
     const cardFrom = cardRows.map((r) => r.date).sort()[0];
     const npOnly = cardFrom ? D.items.filter((x) => x.r.pay === '네이버페이' && x.r.date >= cardFrom && !x.r.canceled && x.r.amount > 0) : [];
-    const off = D.items.filter((x) => x.amt === 0 && x.r.amount > 0);
-    const neg = D.items.filter((x) => x.r.amount < 0);
+    const MOVES = ['수입', '저축', '돌려받은 돈', '내 계좌 이동'];
+    const moves = D.items.filter((x) => MOVES.includes(x.r.cat) || (x.r.kind === '입금' && !x.r.cat));
+    const off = D.items.filter((x) => x.amt === 0 && x.r.amount > 0 && !moves.includes(x));
+    const neg = D.items.filter((x) => x.r.amount < 0 && !moves.includes(x));
     const problems = S.files.flatMap((f) => (f.problems || []).map((p) => `${f.name}: ${p}`));
     const li = (arr, f) => arr.length ? `<ul>${arr.map(f).join('')}</ul>` : '<p class="muted">없어요.</p>';
     return `
@@ -1538,8 +1543,9 @@ a.estore:hover { color: var(--accent); border-bottom-color: var(--accent); }
       <div class="card"><h2>네이버페이 내역에만 있는 결제 · ${npOnly.length}건 · ${won(C.sum(npOnly.map((x) => x.r.amount)))}</h2>
         <p class="sub">카드 내역이 있는 기간(${cardFrom || '-'} 이후)인데 현대카드에서 짝을 못 찾은 결제예요. 네이버페이 포인트·머니나 계좌로 냈을 가능성이 높아요. 농협 계좌에서 네이버페이로 바로 나간 돈이라면 나중에 농협 내역을 합칠 때 두 번 세지 않게 조심해야 해요.</p>
         ${rowTable(npOnly.sort((a, b) => b.r.amount - a.r.amount), { limit: 100 })}</div>
-      <div class="card"><h2>지출에서 뺀 것 · ${off.length}건</h2><p class="sub">취소, 가승인, 카드대금·현금인출·입금, 직접 뺀 것</p>${rowTable(off, { limit: 100, raw: true })}</div>
-      <div class="card"><h2>환불·음수 금액 · ${neg.length}건</h2><p class="sub">다음 달에 들어온 환불 등은 자동으로 짝짓지 않고 그대로 둬요. 가계부 앱에서 상계하면 다음 CSV부터 반영돼요.</p>${rowTable(neg, { limit: 100, raw: true })}</div>
+      <div class="card"><h2>지출에서 뺀 것 · ${off.length}건</h2><p class="sub">취소, 가승인, 카드대금·현금인출, 직접 뺀 것${moves.length ? `. 수입·저축·돌려받은 돈·내 계좌 이동 ${moves.length}건은 대시보드 맨 위 칸에서 따로 봐요` : ''}</p>${rowTable(off, { limit: 100, raw: true })}</div>
+      ${(() => { const un = moves.filter((x) => x.r.kind === '입금' && !x.r.cat && !x.r.offsetTo); return un.length ? `<div class="card"><h2>아직 안 고른 입금 · ${un.length}건</h2><p class="sub">수입·돌려받은 돈·내 계좌 이동 중에서 가계부 앱에서 골라 주세요. 고르기 전에는 수입에도 지출에도 안 들어가요.</p>${rowTable(un, { limit: 50, raw: true })}</div>` : ''; })()}
+      <div class="card"><h2>환불·음수 금액 · ${neg.length}건</h2><p class="sub">결제에 연결 안 된 환불은 음수로 지출에서 빠져요. 가계부 앱에서 결제와 연결(상계)하면 그 결제 금액에서 빠지는 걸로 바뀌어요.</p>${rowTable(neg, { limit: 100, raw: true })}</div>
       ${problems.length ? `<div class="card"><h2>파일 읽기 문제</h2>${li(problems, (p) => `<li>${esc(p)}</li>`)}</div>` : ''}`;
   }
   function bindCheck(root) {
