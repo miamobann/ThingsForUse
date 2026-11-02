@@ -69,4 +69,49 @@ class DoubleCountTest {
         val b = HyundaiCardMessageParser.parse("GS25용인점", "3,600원 · 일반승인\n현대 넥슨 승인 일시불, 11/2 18:00", t)!!
         assertEquals(Matcher.Decision.Insert, Matcher.decide(b, listOf(tx(1, a))))
     }
+
+    private fun card(merchant: String, amount: Long, time: LocalDateTime, source: Source = Source.CARD_NOTI, timeKnown: Boolean = true) =
+        Parsed(source, Kind.PAYMENT, amount, merchant, time, timeKnown = timeKnown)
+
+    private fun np(merchant: String, amount: Long, time: LocalDateTime) = Parsed(Source.NAVERPAY, Kind.PAYMENT, amount, merchant, time)
+
+    @Test
+    fun naverPayMergesWhenCardShowsPgName() {
+        val c = tx(1, card("이니시스 - 주식회사 팬딩", 33_000, t))
+        val d = Matcher.decide(np("스텔라이브 스토어", 33_000, t.plusMinutes(1)), listOf(c))
+        assertIs<Matcher.Decision.AttachNaverPay>(d)
+        // 반대 순서
+        val n = tx(2, np("ChatGPT Plus", 29_000, t))
+        assertIs<Matcher.Decision.AttachCard>(Matcher.decide(card("NICE_통신판매 - 나이스정보통신(대리점)", 29_000, t), listOf(n)))
+    }
+
+    @Test
+    fun naverPayWithoutShippingStillMerges() {
+        val c = tx(1, card("네이버파이낸셜", 23_000, t))
+        assertIs<Matcher.Decision.AttachNaverPay>(Matcher.decide(np("굿즈 세트", 20_000, t), listOf(c)))
+        val n = tx(2, np("굿즈 세트", 20_000, t))
+        val d = Matcher.decide(card("네이버파이낸셜", 23_000, t.plusMinutes(1)), listOf(n))
+        assertIs<Matcher.Decision.AttachCard>(d)
+        assertEquals(23_000, d.amount)
+    }
+
+    @Test
+    fun unrelatedCardPaymentIsNotMergedByShippingRule() {
+        // PG 이름 카드 결제와 2분 넘게 떨어진 네이버페이 알림은 따로
+        val c = tx(1, card("GS25용인점", 5_000, t))
+        assertIs<Matcher.Decision.Insert>(Matcher.decide(np("책", 3_000, t.plusMinutes(2)), listOf(c)))
+    }
+
+    @Test
+    fun splitNaverPayOrderJoinsLinkedCard() {
+        val c = tx(1, card("네이버파이낸셜", 30_000, t)).copy(linkedNaverPay = true)
+        assertIs<Matcher.Decision.Duplicate>(Matcher.decide(np("상품 B", 12_000, t.plusMinutes(1)), listOf(c)))
+    }
+
+    @Test
+    fun taxiStatementMatchesNotification() {
+        val n = tx(1, card("카카오T일반택시_0", 11_700, t))
+        val d = Matcher.decide(card("택시-경기 65 바 6509", 11_700, t.toLocalDate().atStartOfDay(), Source.CARD_FILE, timeKnown = false), listOf(n))
+        assertIs<Matcher.Decision.Duplicate>(d)
+    }
 }

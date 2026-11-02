@@ -63,13 +63,22 @@ object Matcher {
             Channel.NAVERPAY -> {
                 sameAmount.firstOrNull { it.source.channel == Channel.CARD && !it.linkedNaverPay }
                     ?.let { return Decision.AttachNaverPay(it, p.merchant) }
-                // 포인트+카드로 나눠 낸 결제: 카드에는 네이버 대행사 이름으로 더 작은 금액이 찍힌다
-                pool.filter {
-                    it.source.channel == Channel.CARD && !it.linkedNaverPay && it.kind == Kind.PAYMENT &&
-                        it.amount < p.amount && isNaverAgent(it.originalMerchant) && close(it, p) && it.timeKnown
-                }.minByOrNull { minutesApart(it, p) }?.let { return Decision.AttachNaverPay(it, p.merchant) }
                 sameAmount.firstOrNull { it.source == Source.NAVERPAY && it.merchant == p.merchant }
                     ?.let { return Decision.Duplicate(it) }
+                // 금액이 다른 같은 결제:
+                // - 포인트+카드로 나눠 내면 카드 금액이 더 작다
+                // - 네이버페이 알림 금액에 배송비가 빠져 있으면 카드 금액이 조금 더 크다
+                // 카드에는 네이버 이름 대신 PG·가게 이름(이니시스, 나이스정보통신 등)이 찍히기도 해서,
+                // 네이버 이름이 아니면 시각이 더 가까워야(1분) 같은 결제로 본다.
+                pool.filter { it.source.channel == Channel.CARD && !it.linkedNaverPay && naverPayLike(it, p) }
+                    .minByOrNull { minutesApart(it, p) }?.let { return Decision.AttachNaverPay(it, p.merchant) }
+                // 한 주문이 네이버페이 알림 여러 개로 나뉘어 오는 경우: 이미 합쳐진 카드 결제에 같이 묶는다
+                if (p.timeKnown) {
+                    pool.filter {
+                        it.source.channel == Channel.CARD && it.linkedNaverPay && it.kind == Kind.PAYMENT &&
+                            it.timeKnown && it.amount > p.amount && minutesApart(it, p) <= CLOSE_MINUTES
+                    }.minByOrNull { minutesApart(it, p) }?.let { return Decision.Duplicate(it) }
+                }
             }
             Channel.CARD -> {
                 // 다른 경로로 이미 들어온 같은 카드 결제 (알림 ↔ 문자 ↔ 파일)
@@ -85,13 +94,11 @@ object Matcher {
                     }
                         ?.let { return Decision.Duplicate(it, p.approvalNo) }
                 }
-                sameAmount.firstOrNull { it.source == Source.NAVERPAY }
+                sameAmount.firstOrNull { it.source == Source.NAVERPAY && !it.linkedNaverPay }
                     ?.let { return Decision.AttachCard(it, p.merchant, p.source, p.approvalNo, p.amount) }
-                if (isNaverAgent(p.merchant) && p.timeKnown) {
-                    pool.filter { it.source == Source.NAVERPAY && !it.linkedNaverPay && it.amount > p.amount && close(it, p) }
-                        .minByOrNull { minutesApart(it, p) }
-                        ?.let { return Decision.AttachCard(it, p.merchant, p.source, p.approvalNo, p.amount) }
-                }
+                pool.filter { it.source == Source.NAVERPAY && !it.linkedNaverPay && naverPayLike(p, it) }
+                    .minByOrNull { minutesApart(it, p) }
+                    ?.let { return Decision.AttachCard(it, p.merchant, p.source, p.approvalNo, p.amount) }
                 // 해외결제·주유 등: 알림 금액과 청구(파일) 금액이 조금 다를 수 있다. 같은 가게·같은 날·10% 이내면 같은 결제.
                 pool.filter {
                     it.source.channel == Channel.CARD && (it.source == Source.CARD_FILE) != (p.source == Source.CARD_FILE) &&
@@ -143,6 +150,27 @@ object Matcher {
             }
             .maxByOrNull { it.time }
         return if (target != null) Decision.Cancel(target) else Decision.Insert
+    }
+
+    /** 배송비로 보는 최대 차이 */
+    const val SHIPPING_MAX = 5_000L
+
+    /**
+     * 카드 결제와 네이버페이 결제가 금액은 다르지만 같은 결제인지.
+     * 카드가 더 작으면 포인트를 섞어 낸 것, 카드가 조금(배송비만큼) 더 크면 네이버페이 금액에 배송비가 빠진 것.
+     */
+    private fun naverPayLike(card: Tx, np: Parsed): Boolean = naverPayLike(card.amount, card.originalMerchant, card.kind, card.timeKnown, np.amount, np.timeKnown, minutesApart(card, np))
+
+    private fun naverPayLike(card: Parsed, np: Tx): Boolean = naverPayLike(card.amount, card.merchant, card.kind, card.timeKnown, np.amount, np.timeKnown, minutesApart(np, card))
+
+    private fun naverPayLike(
+        cardAmount: Long, cardMerchant: String, cardKind: Kind, cardTimeKnown: Boolean,
+        npAmount: Long, npTimeKnown: Boolean, minutes: Long,
+    ): Boolean {
+        if (cardKind != Kind.PAYMENT || !cardTimeKnown || !npTimeKnown || cardAmount == npAmount) return false
+        val limit = if (isNaverAgent(cardMerchant)) CLOSE_MINUTES else 1L
+        if (minutes > limit) return false
+        return cardAmount < npAmount || cardAmount - npAmount <= SHIPPING_MAX
     }
 
     private fun isNaverAgent(name: String): Boolean = Merchants.key(name).let { it.contains("네이버파이낸셜") || it.contains("네이버페이") }

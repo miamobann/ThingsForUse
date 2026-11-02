@@ -41,8 +41,12 @@ object Merchants {
         val ka = key(a)
         val kb = key(b)
         if (ka.isEmpty() || kb.isEmpty()) return false
-        return ka == kb || ka.contains(kb) || kb.contains(ka)
+        if (ka == kb || ka.contains(kb) || kb.contains(ka)) return true
+        // 택시는 명세서엔 "택시-경기 65 바 6509"처럼 차량번호로, 알림엔 "카카오T일반택시"로 찍힌다
+        return isTaxi(ka) && isTaxi(kb)
     }
+
+    private fun isTaxi(k: String): Boolean = k.contains("택시") || k.startsWith("카카오t")
 
     /** 처음 보는 가게에 미리 골라두는 카테고리. 사용자가 바꾸면 그게 우선이다. */
     private val SUGGESTIONS: List<Pair<String, List<String>>> = listOf(

@@ -164,7 +164,11 @@ object Ingest {
                 d.existing.copy(
                     originalMerchant = d.cardMerchant, linkedNaverPay = true, amount = d.amount,
                     approvalNo = d.approvalNo ?: d.existing.approvalNo,
-                    memo = if (d.amount < d.existing.amount) "네이버페이 포인트 ${d.existing.amount - d.amount}원 사용" else d.existing.memo,
+                    memo = when {
+                        d.amount < d.existing.amount -> "네이버페이 포인트 ${d.existing.amount - d.amount}원 사용"
+                        d.amount > d.existing.amount -> "배송비 등 ${d.amount - d.existing.amount}원 포함"
+                        else -> d.existing.memo
+                    },
                 )
             )
             null
