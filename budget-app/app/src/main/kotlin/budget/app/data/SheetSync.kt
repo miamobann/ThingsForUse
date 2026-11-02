@@ -18,6 +18,8 @@ import java.util.concurrent.TimeUnit
  * 1. 앱에서 고친 분류(edits)를 보낸다 → 스크립트가 시트2 '분류 자료'의 건별 대분류에 적는다
  * 2. 앱 내역 전체(rows, CSV와 같은 17개 열)를 보낸다 → 스크립트가 시트1 '내역'을 통째로 다시 쓴다
  * 3. 시트2의 건별 대분류(categories)를 받아 앱 내역에 반영한다 (분석 화면에서 고친 분류)
+ * 4. 앱에서 만든 단어 규칙(ruleEdits)을 보내고, 시트2의 단어 규칙 전체(rules)를 받아 앱 규칙으로 쓴다
+ * 5. '메일' 탭에서 짝지은 상품명(details)을 받아 메모가 빈 기록에 넣고, 분류가 없으면 단어 규칙으로 분류한다
  *
  * 인터넷이 안 되면 실패로 두고, 다음에 내역이 바뀌거나 앱을 열 때 다시 보낸다. 고친 분류는 보낼 때까지 남겨 둔다.
  */
@@ -42,18 +44,29 @@ object SheetSync {
         s.edits = s.edits + (id to (category ?: ""))
     }
 
+    /** 앱에서 만든 단어 규칙을 기록해 둔다 */
+    fun markRuleEdited(ctx: Context, word: String, category: String) {
+        val s = SyncSettings(ctx)
+        if (!s.configured) return
+        s.ruleEdits = s.ruleEdits + (word to category)
+    }
+
     /** @return 실패하면 이유, 성공하면 null */
     fun syncNow(ctx: Context): String? {
         val s = SyncSettings(ctx)
         val url = s.url ?: return "연결 주소가 없어요"
         val repo = Repository.get(ctx)
         val sentEdits = s.edits
+        val sentRules = s.ruleEdits
         val body = JSONObject().apply {
             put("protocol", PROTOCOL)
             put("key", s.key)
             put("action", "sync")
             put("edits", JSONArray().apply {
                 sentEdits.forEach { (id, c) -> put(JSONObject().put("id", id.toString()).put("category", c)) }
+            })
+            put("ruleEdits", JSONArray().apply {
+                sentRules.forEach { (w, c) -> put(JSONObject().put("word", w).put("category", c)) }
             })
             put("rows", JSONArray().apply { Export.rows(repo.all(), Prefs(ctx).cutoffDay).forEach { put(JSONArray(it)) } })
         }
@@ -64,7 +77,9 @@ object SheetSync {
                 else {
                     // 보낸 수정만 지운다 (보내는 사이에 새로 고친 건 남김)
                     s.edits = s.edits.filter { (id, c) -> sentEdits[id] != c }
+                    s.ruleEdits = s.ruleEdits.filter { (w, c) -> sentRules[w] != c }
                     applyCategories(ctx, res.optJSONArray("categories"))
+                    applyRulesAndDetails(ctx, res.optJSONArray("rules"), res.optJSONArray("details"))
                     null
                 }
             },
@@ -94,6 +109,38 @@ object SheetSync {
                         repo.update(budget.core.MoneyFlow.withCategory(t, category), fromSync = true)
                         changed++
                     }
+                }
+            }
+            if (changed > 0) repo.changed()
+        }.get()
+    }
+
+    /** 시트의 단어 규칙으로 바꾸고(예전 스크립트라 rules가 없으면 그대로), 메일 상품명을 빈 메모에 넣는다 */
+    private fun applyRulesAndDetails(ctx: Context, rules: JSONArray?, details: JSONArray?) {
+        val repo = Repository.get(ctx)
+        val waiting = SyncSettings(ctx).ruleEdits
+        var changed = 0
+        repo.writer.submit {
+            repo.transaction {
+                if (rules != null) {
+                    val map = (0 until rules.length()).mapNotNull { i ->
+                        val o = rules.optJSONObject(i) ?: return@mapNotNull null
+                        val w = o.optString("word").trim().lowercase()
+                        val c = o.optString("category")
+                        if (w.isEmpty() || c.isEmpty()) null else w to c
+                    }.toMap() + waiting.filterValues { it.isNotEmpty() }
+                    if (map != repo.wordRules()) { repo.replaceWordRules(map); changed++ }
+                }
+                if (details != null) for (i in 0 until details.length()) {
+                    val o = details.optJSONObject(i) ?: continue
+                    val id = o.optString("id").toLongOrNull() ?: continue
+                    val memo = o.optString("memo").trim()
+                    val t = repo.byId(id) ?: continue
+                    if (memo.isEmpty() || t.memo.isNotBlank()) continue
+                    var u = t.copy(memo = memo)
+                    if (u.category == null) repo.ruleFor(u)?.let { u = budget.core.MoneyFlow.withCategory(u, it) }
+                    repo.update(u)
+                    changed++
                 }
             }
             if (changed > 0) repo.changed()
@@ -152,6 +199,14 @@ class SyncSettings(ctx: Context) {
             return o.keys().asSequence().mapNotNull { k -> k.toLongOrNull()?.let { it to o.getString(k) } }.toMap()
         }
         set(v) = p.edit().putString("edits", JSONObject().apply { v.forEach { (k, c) -> put(k.toString(), c) } }.toString()).apply()
+
+    /** 아직 시트로 못 보낸 단어 규칙: 단어 → 대분류("" = 지움) */
+    var ruleEdits: Map<String, String>
+        get() {
+            val o = runCatching { JSONObject(p.getString("rule_edits", "{}")!!) }.getOrDefault(JSONObject())
+            return o.keys().asSequence().associateWith { o.getString(it) }
+        }
+        set(v) = p.edit().putString("rule_edits", JSONObject().apply { v.forEach { (k, c) -> put(k, c) } }.toString()).apply()
 
     var lastResult: String?
         get() = p.getString("last", null)

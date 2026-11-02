@@ -19,6 +19,7 @@ class BudgetApp : Application() {
             SheetSync.schedule(this)
         }
         repo.onCategoryEdited = { id, category -> SheetSync.markEdited(this, id, category) }
+        repo.onWordRuleEdited = { word, category -> SheetSync.markRuleEdited(this, word, category) }
     }
 
     companion object {

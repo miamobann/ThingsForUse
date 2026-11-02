@@ -7,8 +7,11 @@
  *   { protocol: 1, key: "연결 비밀번호", action: "sync",
  *     edits: [{ id: "123", category: "식비" }],          // 앱에서 고친 대분류 ("" = 분류 없음)
  *     rows:  [["123","2026-10-15","15:20","29000", ...17개 열], ...] }  // 앱 내역 전체
+       ruleEdits: [{ word: "중천", category: "후원" }],   // 앱에서 만든 단어 규칙 ("" = 지움)
  * 돌려주는 것:
- *   { ok: true, categories: [{ id: "123", category: "식비" }], rowCount: 608 }
+ *   { ok: true, categories: [{ id: "123", category: "식비" }], rowCount: 608,
+ *     rules: [{ word: "중천", category: "후원" }],          // '분류 자료'의 단어 규칙 전체 (분석 화면과 같이 씀)
+ *     details: [{ id: "123", memo: "유콘 멤버십 (YouTube)" }] }  // '메일' 탭에서 앱 기록과 짝지은 상품명
  *   { ok: false, error: "이유" }
  *
  * 시트1 '내역' 열: id, 날짜, 시각, 금액, 가게명, 원래가게명, 카테고리, 결제수단, 할부, 송금여부, 지출포함여부, 취소됨, 메모, 출처,
@@ -40,9 +43,13 @@ function doPost(e) {
   try {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     syncApplyEdits_(ss, req.edits || []);
+    syncApplyRuleEdits_(ss, req.ruleEdits || []);
     if (req.rows) syncWriteTx_(ss, req.rows);
     syncRenameWithDate_(ss);
-    return syncJson_({ ok: true, categories: syncReadCategories_(ss), rowCount: (req.rows || []).length });
+    return syncJson_({
+      ok: true, categories: syncReadCategories_(ss), rowCount: (req.rows || []).length,
+      rules: syncReadRules_(ss), details: syncReadDetails_(ss),
+    });
   } catch (err) {
     return syncJson_({ ok: false, error: String(err && err.message || err) });
   } finally {
@@ -127,6 +134,54 @@ function syncApplyEdits_(ss, edits) {
     var start = meta.sheet.getLastRow() + 1;
     meta.sheet.getRange(start, 1, append.length, 5).setNumberFormat('@').setValues(append);
   }
+}
+
+/** '분류 자료'의 단어 규칙(종류='규칙', 키=단어). 대분류가 있는 것만. */
+function syncReadRules_(ss) {
+  var out = [];
+  syncReadMeta_(ss).data.forEach(function (r) {
+    if (String(r[0]) === '규칙' && String(r[1]) !== '' && String(r[2]) !== '') out.push({ word: String(r[1]), category: String(r[2]) });
+  });
+  return out;
+}
+
+/** 앱에서 만든 단어 규칙을 '분류 자료'에 넣는다. 소분류는 그대로 두고 대분류만 바꾼다. category ''면 그 규칙을 지운다. */
+function syncApplyRuleEdits_(ss, edits) {
+  if (!edits.length) return;
+  var meta = syncReadMeta_(ss);
+  var rowOf = {};
+  meta.data.forEach(function (r, i) {
+    if (String(r[0]) === '규칙') rowOf[String(r[1])] = i + 2;
+  });
+  var append = [], remove = [];
+  edits.forEach(function (e) {
+    var w = String(e.word || '').trim(), cat = String(e.category || '');
+    if (!w) return;
+    if (rowOf[w] && cat === '') remove.push(rowOf[w]);
+    else if (rowOf[w]) meta.sheet.getRange(rowOf[w], 3).setValue(cat);
+    else if (cat !== '') append.push(['규칙', w, cat, '', '']);
+  });
+  remove.sort(function (a, b) { return b - a; }).forEach(function (row) { meta.sheet.deleteRow(row); });
+  if (append.length) {
+    var start = meta.sheet.getLastRow() + 1;
+    meta.sheet.getRange(start, 1, append.length, 5).setNumberFormat('@').setValues(append);
+  }
+}
+
+/** '메일' 탭(Mail.gs가 씀)에서 앱 기록과 짝지은 줄의 상품명. 탭이 없으면 빈 목록. */
+function syncReadDetails_(ss) {
+  var sh = ss.getSheetByName('메일');
+  if (!sh || sh.getLastRow() < 2) return [];
+  var values = sh.getRange(1, 1, sh.getLastRow(), sh.getLastColumn()).getValues();
+  var head = values[0].map(String);
+  var iId = head.indexOf('내역 id'), iItem = head.indexOf('상품명');
+  if (iId < 0 || iItem < 0) return [];
+  var out = [];
+  for (var i = 1; i < values.length; i++) {
+    var id = String(values[i][iId]).trim(), memo = String(values[i][iItem]).trim();
+    if (id && memo) out.push({ id: id, memo: memo });
+  }
+  return out;
 }
 
 /**

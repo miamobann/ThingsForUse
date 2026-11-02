@@ -43,6 +43,8 @@ data class Parsed(
     /** 실시간 이용내역에서 '취소'로 표시된 승인 (가승인 취소 등) */
     val cancelled: Boolean = false,
     val raw: String = "",
+    /** 상품명 등 자세한 내용 (메모에 넣는다) */
+    val detail: String = "",
 )
 
 /** 저장된 거래 한 건 */

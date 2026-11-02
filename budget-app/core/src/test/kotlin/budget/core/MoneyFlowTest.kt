@@ -83,3 +83,14 @@ class RulesTest {
         assertEquals(listOf("치지직@4900", "치지직"), Rules.lookupKeys("치지직", Kind.PAYMENT, 4_900))
     }
 }
+
+class WordRuleTest {
+    @Test
+    fun longestWordWins() {
+        val words = mapOf("치즈" to "후원", "1개월" to "구독", "1개월 아루냥 정기구독" to "구독·멤버십")
+        assertEquals("후원", Rules.matchWord(words, "치지직\n치즈 중천"))
+        assertEquals("구독·멤버십", Rules.matchWord(words, "아야츠노 유니 1개월 아루냥 정기구독"))
+        assertEquals(null, Rules.matchWord(words, "GS25"))
+        assertEquals("w:google one", Rules.wordKey(" Google One "))
+    }
+}

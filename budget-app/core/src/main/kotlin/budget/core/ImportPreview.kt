@@ -62,5 +62,6 @@ fun Parsed.toTx(id: Long, category: String?): Tx {
     approvalNo = approvalNo,
     installmentMonths = installmentMonths,
     raw = raw,
+    memo = detail,
     )
 }

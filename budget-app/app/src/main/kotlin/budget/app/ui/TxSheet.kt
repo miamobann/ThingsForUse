@@ -69,6 +69,7 @@ private fun TxEditor(t: Tx, onClose: () -> Unit) {
     var category by remember(t.id) { mutableStateOf(t.category) }
     var keepRule by remember(t.id) { mutableStateOf(!agentOnly) }
     var byAmount by remember(t.id) { mutableStateOf(false) }
+    var word by remember(t.id) { mutableStateOf("") }
     var include by remember(t.id) { mutableStateOf(t.includeInSpending) }
     var memo by remember(t.id) { mutableStateOf(t.memo) }
     var newCategory by remember { mutableStateOf<String?>(null) }
@@ -168,6 +169,13 @@ private fun TxEditor(t: Tx, onClose: () -> Unit) {
                 }
             }
         }
+        if ((keepRule || agentOnly) && !income) {
+            OutlinedTextField(
+                word, { word = it.take(30) }, Modifier.fillMaxWidth(), singleLine = true,
+                label = { Text("이 단어가 들어간 결제만 (선택)") },
+                supportingText = { Text("가게 이름·메모(상품명)에 이 단어가 있으면 이 분류로 해요. 예: 중천. 가게·금액 기억보다 먼저예요.", fontSize = 11.sp) },
+            )
+        }
 
         if (!income) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
@@ -190,7 +198,7 @@ private fun TxEditor(t: Tx, onClose: () -> Unit) {
                 repo.writer.execute {
                     val updated = t.copy(includeInSpending = include, memo = memo)
                     repo.update(updated)
-                    if (chosen != null && (chosen != t.category || keepRule)) repo.setCategory(updated, chosen, keepRule && !agentOnly, byAmount)
+                    if (chosen != null && (chosen != t.category || keepRule || word.isNotBlank())) repo.setCategory(updated, chosen, (keepRule && !agentOnly) || word.isNotBlank(), byAmount, word.takeIf { it.isNotBlank() })
                     repo.changed()
                 }
                 onClose()

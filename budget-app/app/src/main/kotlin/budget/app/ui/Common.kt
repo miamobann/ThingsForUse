@@ -159,7 +159,7 @@ fun TxRow(t: Tx, onClick: () -> Unit) {
                 budget.core.Installment.of(t)?.let { add("${it.months}개월 할부 · 남은 ${won(it.remaining)}") }
                 if (t.offsetOf != null) add("상계됨")
                 else if (!t.includeInSpending && t.kind != Kind.INCOME && !budget.core.MoneyFlow.isFlowCategory(t.category)) add("지출 제외")
-                add(t.source.label)
+                if (t.memo.isNotBlank()) add(t.memo) else add(t.source.label)
             }
             Text(bits.joinToString(" · "), fontSize = 12.sp, color = C.sub, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }

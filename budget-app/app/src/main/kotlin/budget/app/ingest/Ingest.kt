@@ -211,7 +211,8 @@ object Ingest {
     /** 결정대로 DB를 바꾸고, 새로 생기거나 이름이 바뀐 거래를 돌려준다 */
     private fun apply(repo: Repository, p: Parsed, d: Matcher.Decision): Tx? = when (d) {
         Matcher.Decision.Insert -> {
-            val category = repo.ruleFor(p.merchant, p.kind, p.amount) ?: Merchants.suggestCategory(p.merchant, p.kind)
+            val category = repo.ruleFor(p.merchant, p.kind, p.amount, listOf(p.merchant, p.detail, p.raw).joinToString("\n"))
+                ?: Merchants.suggestCategory(p.merchant, p.kind)
             val tx = p.toTx(0, category)
             tx.copy(id = repo.insert(tx))
         }
@@ -225,7 +226,8 @@ object Ingest {
             // 카드에는 대행사 이름만 있었으니 네이버페이의 실제 가게 이름으로 바꾸고 분류도 다시 해 본다
             val name = Merchants.displayName(d.merchant)
             val category = d.existing.category.takeUnless { Merchants.isPaymentAgentOnly(d.existing.merchant) }
-                ?: repo.ruleFor(name, d.existing.kind, d.existing.amount) ?: Merchants.suggestCategory(name, d.existing.kind)
+                ?: repo.ruleFor(name, d.existing.kind, d.existing.amount, listOf(name, d.existing.memo, d.existing.raw).joinToString("\n"))
+                ?: Merchants.suggestCategory(name, d.existing.kind)
             val t = d.existing.copy(merchant = name, linkedNaverPay = true, category = category)
             repo.update(t)
             t

@@ -149,24 +149,51 @@ class Repository private constructor(ctx: Context) {
      * byAmount면 이 가게의 같은 금액에만 기억한다(치지직 4,900원 = 구독처럼). 금액 규칙이 가게 규칙보다 먼저.
      * 결제대행사 이름만 있는 가게(네이버파이낸셜 등)는 기억하지 않는다.
      */
-    fun setCategory(t: Tx, category: String, remember: Boolean, byAmount: Boolean = false) {
+    fun setCategory(t: Tx, category: String, remember: Boolean, byAmount: Boolean = false, word: String? = null) {
         update(MoneyFlow.withCategory(t, category))
-        if (remember && !Merchants.isPaymentAgentOnly(t.merchant)) {
+        val w = word?.trim()?.lowercase().orEmpty()
+        if (remember && w.isNotEmpty()) {
+            putRule(Rules.wordKey(w), category)
+            onWordRuleEdited?.invoke(w, category)
+            uncategorized().filter { Rules.textOf(it).contains(w) }.forEach { update(MoneyFlow.withCategory(it, category)) }
+        } else if (remember && !Merchants.isPaymentAgentOnly(t.merchant)) {
             val key = MoneyFlow.ruleKey(t.merchant, t.kind)
             putRule(if (byAmount) Rules.amountKey(key, t.amount) else key, category)
             uncategorized().filter { MoneyFlow.ruleKey(it.merchant, it.kind) == key && (!byAmount || it.amount == t.amount) }
-                .forEach { update(MoneyFlow.withCategory(it, ruleFor(it.merchant, it.kind, it.amount) ?: category)) }
+                .forEach { update(MoneyFlow.withCategory(it, ruleFor(it) ?: category)) }
         }
     }
 
-    /** 금액 규칙 → 가게 규칙 순서로 찾는다 */
-    fun ruleFor(merchant: String, kind: Kind, amount: Long? = null): String? {
+    /** 앱에서 단어 규칙을 만들면 부른다: 시트로 보낼 규칙 기록 */
+    var onWordRuleEdited: ((String, String) -> Unit)? = null
+
+    /** 이 기록에 맞는 기억: 단어 규칙 → 가게+금액 → 가게 */
+    fun ruleFor(t: Tx): String? = ruleFor(t.merchant, t.kind, t.amount, Rules.textOf(t))
+
+    /** 단어 규칙(text가 있을 때) → 금액 규칙 → 가게 규칙 순서로 찾는다 */
+    fun ruleFor(merchant: String, kind: Kind, amount: Long? = null, text: String? = null): String? {
+        if (text != null && kind != Kind.INCOME) Rules.matchWord(wordRules(), text)?.let { return it }
         if (Merchants.isPaymentAgentOnly(merchant)) return null
         val keys = if (amount != null) Rules.lookupKeys(merchant, kind, amount) else listOf(MoneyFlow.ruleKey(merchant, kind))
         for (k in keys) {
             db.rawQuery("SELECT category FROM rule WHERE merchant_key = ?", arrayOf(k)).use { c -> if (c.moveToFirst()) return c.getString(0) }
         }
         return null
+    }
+
+    /** 단어 규칙: 단어(소문자) → 대분류 */
+    fun wordRules(): Map<String, String> {
+        val out = mutableMapOf<String, String>()
+        db.rawQuery("SELECT merchant_key, category FROM rule WHERE merchant_key LIKE 'w:%'", null).use { c ->
+            while (c.moveToNext()) out[c.getString(0).removePrefix(Rules.WORD_PREFIX)] = c.getString(1)
+        }
+        return out
+    }
+
+    /** 시트의 단어 규칙 목록으로 바꾼다 (분석 화면에서 만들거나 지운 것 반영) */
+    fun replaceWordRules(rules: Map<String, String>) {
+        db.delete("rule", "merchant_key LIKE 'w:%'", null)
+        rules.forEach { (w, c) -> putRule(Rules.wordKey(w), c) }
     }
 
     fun rules(): Map<String, String> {
