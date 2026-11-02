@@ -834,7 +834,7 @@ details summary { cursor: pointer; font-weight: 600; margin: 4px 0; }
     try {
       const d = await gasCall('saLoad');
       const st = C.metaToState(d.meta);
-      const rows = C.parseAppRows([C.CSV_COLS].concat(d.tx));
+      const rows = C.parseAppRows([d.header || C.CSV_COLS.concat(C.EXTRA_COLS)].concat(d.tx));
       Object.assign(S, { memory: st.memory, overrides: st.overrides, rules: st.rules, dismissed: st.dismissed,
         tree: st.tree || S.tree, opts: st.opts || S.opts });
       S.files = S.files.filter((f) => f.key !== 'app');

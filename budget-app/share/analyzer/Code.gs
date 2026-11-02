@@ -34,6 +34,7 @@ function saLoad() {
   var txRows = tx.getLastRow() > 1 ? tx.getRange(2, 1, tx.getLastRow() - 1, n).getValues() : [];
   var props = PropertiesService.getScriptProperties();
   return {
+    header: SYNC_TX_HEADER,
     tx: txRows.map(function (r) { return r.map(saStr_); }).filter(function (r) { return r[0] !== '' || r[1] !== ''; }),
     meta: saReadMeta_(meta),
     hasSync: !!props.getProperty('SYNC_KEY'),
