@@ -1,0 +1,130 @@
+package budget.core
+
+import java.time.Duration
+
+/**
+ * 새로 들어온 결제를 이미 저장된 거래와 비교해서 어떻게 처리할지 정한다.
+ * - 같은 결제가 카드 알림·문자·파일로 여러 번 들어오면 한 건만 남긴다.
+ * - 카드 결제와 네이버페이 알림은 금액이 같고 몇 분 안이면 한 건으로 합치고, 가게 이름은 네이버페이 쪽을 쓴다.
+ * - 취소는 짝이 되는 결제를 찾아 취소 표시를 한다.
+ */
+object Matcher {
+
+    /** 같은 결제로 볼 시간 차이 */
+    const val CLOSE_MINUTES = 3L
+
+    sealed interface Decision {
+        /** 새 거래로 저장 */
+        data object Insert : Decision
+
+        /** 이미 있는 거래. 승인번호처럼 비어 있던 정보만 채운다. */
+        data class Duplicate(val existing: Tx, val approvalNo: String? = null) : Decision
+
+        /** 카드 결제에 네이버페이 알림의 실제 가게 이름을 붙인다 */
+        data class AttachNaverPay(val existing: Tx, val merchant: String) : Decision
+
+        /** 네이버페이 알림이 먼저 와 있던 결제에 카드 쪽 정보를 붙인다 */
+        data class AttachCard(val existing: Tx, val cardMerchant: String, val source: Source, val approvalNo: String?) : Decision
+
+        /** 기존 결제를 취소 처리 */
+        data class Cancel(val target: Tx) : Decision
+
+        /** 기록할 필요 없음 (예: 기록된 적 없는 가승인의 취소) */
+        data object Ignore : Decision
+    }
+
+    /**
+     * @param existing 비교할 기존 거래 (보통 앞뒤 며칠치)
+     * @param consumed 파일 한 개를 가져오는 동안 이미 짝지어진 거래 id. 같은 금액 결제 두 건이 한 건에 몰리지 않게 한다.
+     */
+    fun decide(p: Parsed, existing: List<Tx>, consumed: Set<Long> = emptySet()): Decision {
+        val pool = existing.filter { it.id !in consumed }
+
+        // 취소는 이미 짝지어진 결제도 대상이 될 수 있어서 전체에서 찾는다
+        if (p.cancelled) return decideCancelledApproval(p, existing)
+        if (p.kind == Kind.CANCEL) return decideCancel(p, existing)
+
+        p.approvalNo?.let { no -> pool.firstOrNull { it.approvalNo == no }?.let { return Decision.Duplicate(it) } }
+
+        // 같은 경로에서 글자까지 똑같은 알림이 다시 오면(알림 갱신) 중복
+        pool.firstOrNull { it.source == p.source && it.raw.isNotEmpty() && it.raw == p.raw && close(it, p) }
+            ?.let { return Decision.Duplicate(it) }
+
+        val sameAmount = pool.filter { it.amount == p.amount && it.kind != Kind.CANCEL && close(it, p) }
+            .sortedBy { minutesApart(it, p) }
+
+        when (p.source.channel) {
+            Channel.NAVERPAY -> {
+                sameAmount.firstOrNull { it.source.channel == Channel.CARD && !it.linkedNaverPay }
+                    ?.let { return Decision.AttachNaverPay(it, p.merchant) }
+                sameAmount.firstOrNull { it.source == Source.NAVERPAY && it.merchant == p.merchant }
+                    ?.let { return Decision.Duplicate(it) }
+            }
+            Channel.CARD -> {
+                // 다른 경로로 이미 들어온 같은 카드 결제 (알림 ↔ 문자 ↔ 파일)
+                sameAmount.firstOrNull {
+                    it.source.channel == Channel.CARD && it.source != p.source &&
+                        (it.approvalNo == null || p.approvalNo == null) && merchantMatches(it, p)
+                }?.let { return Decision.Duplicate(it, p.approvalNo) }
+                // 파일끼리 겹치는 경우 (같은 파일을 두 번 올렸거나, 명세서와 실시간 내역이 겹침).
+                // 승인번호가 둘 다 있으면 위에서 이미 비교했다.
+                if (p.source == Source.CARD_FILE) {
+                    sameAmount.firstOrNull {
+                        it.source == Source.CARD_FILE && (it.approvalNo == null || p.approvalNo == null) && merchantMatches(it, p)
+                    }
+                        ?.let { return Decision.Duplicate(it, p.approvalNo) }
+                }
+                sameAmount.firstOrNull { it.source == Source.NAVERPAY }
+                    ?.let { return Decision.AttachCard(it, p.merchant, p.source, p.approvalNo) }
+            }
+            Channel.BANK -> {
+                sameAmount.firstOrNull { it.source.channel == Channel.BANK && it.source != p.source }
+                    ?.let { return Decision.Duplicate(it) }
+                if (p.source == Source.BANK_FILE) {
+                    sameAmount.firstOrNull { it.source == Source.BANK_FILE && Merchants.similar(it.originalMerchant, p.merchant) }
+                        ?.let { return Decision.Duplicate(it) }
+                }
+            }
+            Channel.MANUAL -> Unit
+        }
+        return Decision.Insert
+    }
+
+    /** 실시간 이용내역에 '취소'로 찍힌 승인: 기록된 결제가 있으면 취소, 없으면 무시 */
+    private fun decideCancelledApproval(p: Parsed, pool: List<Tx>): Decision {
+        val match = p.approvalNo?.let { no -> pool.firstOrNull { it.approvalNo == no } }
+            ?: pool.filter { it.kind == Kind.PAYMENT && it.amount == p.amount && close(it, p) && merchantMatches(it, p) }
+                .minByOrNull { minutesApart(it, p) }
+            ?: return Decision.Ignore
+        return if (match.cancelled) Decision.Duplicate(match, p.approvalNo) else Decision.Cancel(match)
+    }
+
+    private fun decideCancel(p: Parsed, pool: List<Tx>): Decision {
+        val window = pool.filter {
+            it.amount == p.amount && !it.time.isAfter(p.time.plusDays(1)) &&
+                Duration.between(it.time, p.time).toDays() <= 90
+        }
+        // 이미 같은 취소가 들어와 있으면 중복
+        window.firstOrNull { it.cancelled && merchantMatches(it, p) && sameDayOrClose(it, p) }?.let { return Decision.Duplicate(it) }
+        window.firstOrNull { it.kind == Kind.CANCEL && merchantMatches(it, p) && sameDayOrClose(it, p) }?.let { return Decision.Duplicate(it) }
+        val target = window
+            .filter { it.kind == Kind.PAYMENT && !it.cancelled && merchantMatches(it, p) }
+            .maxByOrNull { it.time }
+        return if (target != null) Decision.Cancel(target) else Decision.Insert
+    }
+
+    private fun merchantMatches(t: Tx, p: Parsed): Boolean =
+        Merchants.similar(t.originalMerchant, p.merchant) || Merchants.similar(t.merchant, p.merchant) ||
+            // 같은 결제라도 경로마다 이름이 다르게 찍힐 수 있어서, 시각까지 아는 경우엔 금액+시각만으로도 본다
+            (t.timeKnown && p.timeKnown && minutesApart(t, p) <= CLOSE_MINUTES)
+
+    private fun minutesApart(t: Tx, p: Parsed): Long = kotlin.math.abs(Duration.between(t.time, p.time).toMinutes())
+
+    private fun sameDayOrClose(t: Tx, p: Parsed): Boolean =
+        t.time.toLocalDate() == p.time.toLocalDate() || minutesApart(t, p) <= CLOSE_MINUTES
+
+    /** 시각을 둘 다 알면 몇 분 안, 하나라도 날짜만 알면 같은 날 */
+    private fun close(t: Tx, p: Parsed): Boolean =
+        if (t.timeKnown && p.timeKnown) minutesApart(t, p) <= CLOSE_MINUTES
+        else t.time.toLocalDate() == p.time.toLocalDate()
+}

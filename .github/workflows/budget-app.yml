@@ -1,0 +1,54 @@
+name: 가계부 앱 빌드
+
+on:
+  push:
+    paths:
+      - "budget-app/**"
+      - ".github/workflows/budget-app.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: budget-app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: 핵심 로직 테스트
+        run: ./gradlew :core:test --no-daemon
+
+      - name: APK 빌드
+        run: ./gradlew :app:assembleRelease --no-daemon
+
+      - name: APK 이름 정리
+        run: cp app/build/outputs/apk/release/app-release.apk budget-app.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: budget-app-apk
+          path: budget-app/budget-app.apk
+
+      # 폰에서 바로 받을 수 있게 '가계부 앱 최신' 릴리스에 올린다 (매번 교체)
+      - name: 최신 설치 파일 릴리스
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete budget-app-latest --yes --cleanup-tag || true
+          gh release create budget-app-latest budget-app.apk \
+            --title "가계부 앱 최신 (빌드 ${{ github.run_number }})" \
+            --notes "브랜치 ${{ github.ref_name }} · 커밋 ${{ github.sha }}. 폰에서 budget-app.apk를 받아 설치하세요." \
+            --target ${{ github.sha }} --prerelease
