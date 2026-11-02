@@ -47,14 +47,14 @@ function doPost(e) {
 }
 
 /** 분석 화면 설정에서 부른다: 연결 비밀번호 정하기 (8자 이상) */
-function setSyncKey(key) {
+function setSyncKey_(key) {
   key = String(key || '').trim();
   if (key.length < 8) throw new Error('비밀번호는 8자 이상으로 정해 주세요');
   PropertiesService.getScriptProperties().setProperty('SYNC_KEY', key);
   return true;
 }
 
-function hasSyncKey() {
+function hasSyncKey_() {
   return !!PropertiesService.getScriptProperties().getProperty('SYNC_KEY');
 }
 
