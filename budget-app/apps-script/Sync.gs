@@ -38,6 +38,7 @@ function doPost(e) {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     syncApplyEdits_(ss, req.edits || []);
     if (req.rows) syncWriteTx_(ss, req.rows);
+    syncRenameWithDate_(ss);
     return syncJson_({ ok: true, categories: syncReadCategories_(ss), rowCount: (req.rows || []).length });
   } catch (err) {
     return syncJson_({ ok: false, error: String(err && err.message || err) });
@@ -123,6 +124,18 @@ function syncApplyEdits_(ss, edits) {
     var start = meta.sheet.getLastRow() + 1;
     meta.sheet.getRange(start, 1, append.length, 5).setNumberFormat('@').setValues(append);
   }
+}
+
+/**
+ * 시트 파일 이름 끝에 마지막 동기화 날짜를 붙인다: "가계부" → "가계부_261103".
+ * 이미 _YYMMDD가 붙어 있으면 날짜만 바꾼다. 끄려면 스크립트 속성 RENAME_WITH_DATE를 off로.
+ */
+function syncRenameWithDate_(ss) {
+  if (PropertiesService.getScriptProperties().getProperty('RENAME_WITH_DATE') === 'off') return;
+  var stamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone() || 'Asia/Seoul', 'yyMMdd');
+  var base = ss.getName().replace(/_\d{6}$/, '');
+  var name = base + '_' + stamp;
+  if (ss.getName() !== name) ss.rename(name);
 }
 
 function syncJson_(obj) {
