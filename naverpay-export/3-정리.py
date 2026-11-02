@@ -94,20 +94,18 @@ def main(path):
             r['금액'] = '0'
             r['메모'] += ' / 금액 없음(포인트 결제 또는 함께 배송 추정)'
 
-    # 4) 중복 의심: 같은 날, 같은 가게, 같은 금액, 같은 상품, 30분 안
+    # 4) 같은 날 같은 가게·금액·상품이 여러 건
+    #    Min 기준: 시각이 다르면 실제로 여러 번 결제한 것 → 그대로 둠.
+    #    같은 분이면 한 주문 안의 상품 여러 개 → 그대로 두고 메모만 남김.
     groups = defaultdict(list)
     for r in clean:
         if r['취소됨'] == 'Y':
             continue
-        groups[(r['날짜'], r['원래가게명'], r['금액'], r['메모'].split(' / ')[0])].append(r)
+        groups[(r['날짜'], r['시각'], r['원래가게명'], r['금액'], r['메모'].split(' / ')[0])].append(r)
     for g in groups.values():
-        if len(g) < 2:
-            continue
-        g.sort(key=lambda r: r['시각'])
-        t = [datetime.strptime(r['시각'], '%H:%M') for r in g]
-        if (t[-1] - t[0]).total_seconds() <= 8 * 3600:
-            for r in g[1:]:
-                flag(r, '중복 의심', f"같은 날 같은 상품·금액이 {g[0]['시각']}에도 있음")
+        if len(g) > 1:
+            for r in g:
+                r['메모'] += f' / 같은 주문에 같은 상품 {len(g)}개'
 
     # 저장
     out_csv = src.with_name(src.stem + '_정리.csv')
@@ -125,7 +123,7 @@ def main(path):
         f'- 확인이 필요한 건: {len(checks)}건',
         '',
     ]
-    for kind in ['중복 의심', '금액 없음', '가게 모름']:
+    for kind in ['가게 모름']:
         items = [(r, why) for k, r, why in checks if k == kind]
         if not items:
             continue
