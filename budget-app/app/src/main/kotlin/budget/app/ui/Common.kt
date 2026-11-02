@@ -154,6 +154,7 @@ fun TxRow(t: Tx, onClick: () -> Unit) {
                 add(t.category ?: "미분류")
                 add(if (t.timeKnown) t.time.format(MD_HM) else t.time.format(MD))
                 if (t.cancelled) add("취소됨")
+                budget.core.Installment.of(t)?.let { add("${it.months}개월 할부 · 남은 ${won(it.remaining)}") }
                 if (!t.includeInSpending) add("지출 제외")
                 add(t.source.label)
             }
@@ -161,12 +162,18 @@ fun TxRow(t: Tx, onClick: () -> Unit) {
         }
         Spacer(Modifier.width(8.dp))
         Text(
-            (if (t.kind == Kind.CANCEL) "-" else "") + won(t.amount),
+            sign(t) + won(t.amount),
             fontSize = 15.sp, fontWeight = FontWeight.Bold,
             color = if (struck) C.muted else C.text,
             textDecoration = if (t.cancelled) TextDecoration.LineThrough else null,
         )
     }
+}
+
+fun sign(t: Tx): String = when (t.kind) {
+    Kind.CANCEL -> "-"
+    Kind.INCOME -> "+"
+    else -> ""
 }
 
 @Composable

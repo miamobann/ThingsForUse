@@ -43,7 +43,7 @@ object Export {
         val sb = StringBuilder("﻿")
         sb.append(CSV_HEADER.joinToString(",")).append("\r\n")
         for (t in txs.sortedWith(compareBy({ it.time }, { it.id }))) {
-            val amount = if (t.kind == Kind.CANCEL) -t.amount else t.amount
+            val amount = if (t.kind == Kind.CANCEL || t.kind == Kind.INCOME) -t.amount else t.amount
             val row = listOf(
                 t.id.toString(),
                 t.time.format(DATE),

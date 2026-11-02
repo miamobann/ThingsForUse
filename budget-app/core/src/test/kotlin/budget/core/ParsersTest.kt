@@ -83,9 +83,14 @@ class ParsersTest {
     }
 
     @Test
-    fun `농협 입금은 기록하지 않는다`() {
+    fun `농협 입금은 지출이 아닌 입금으로`() {
         assertTrue(NhBankSmsParser.looksLikeNh("농협 입금50,000원"))
-        assertNull(NhBankSmsParser.parse("농협 입금50,000원\n11/01 10:13 352-****-7848-43\n홍길동 잔액1원", now))
+        val p = NhBankSmsParser.parse("농협 입금50,000원\n11/01 10:13 352-****-7848-43\n홍길동 잔액1원", now)!!
+        assertEquals(Kind.INCOME, p.kind)
+        assertEquals("홍길동", p.merchant)
+        val t = p.toTx(1, null)
+        assertEquals(Categories.INCOME, t.category)
+        assertFalse(t.includeInSpending)
     }
 
     @Test

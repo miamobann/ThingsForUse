@@ -10,6 +10,7 @@ class Stats(private val txs: List<Tx>, private val includeTransfers: Boolean) {
     fun effective(t: Tx): Long = when {
         t.cancelled -> 0
         !t.includeInSpending -> 0
+        t.kind == Kind.INCOME -> 0
         t.kind == Kind.TRANSFER && !includeTransfers -> 0
         t.kind == Kind.CANCEL -> -t.amount
         else -> t.amount

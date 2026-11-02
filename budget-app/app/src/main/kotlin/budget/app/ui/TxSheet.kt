@@ -38,7 +38,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import budget.app.data.Prefs
 import budget.app.data.Repository
+import budget.core.Installment
 import budget.core.Kind
+import budget.core.Offset
 import budget.core.Merchants
 import budget.core.Tx
 
@@ -79,7 +81,7 @@ private fun TxEditor(t: Tx, onClose: () -> Unit) {
             Text(t.merchant, fontSize = 20.sp, fontWeight = FontWeight.Bold)
             Text(
                 listOfNotNull(
-                    (if (t.kind == Kind.CANCEL) "-" else "") + won(t.amount),
+                    sign(t) + won(t.amount),
                     if (t.timeKnown) t.time.format(MD_HM) else t.time.format(MD),
                     t.source.label,
                     if (t.cancelled) "취소됨" else null,
@@ -87,7 +89,15 @@ private fun TxEditor(t: Tx, onClose: () -> Unit) {
                 fontSize = 15.sp, color = C.sub,
             )
             if (t.originalMerchant != t.merchant) Text("카드 표시: ${t.originalMerchant}", fontSize = 12.sp, color = C.sub)
+            Installment.of(t)?.let { i ->
+                Text(
+                    "${i.months}개월 할부 · 전체 ${won(i.total)} · 월 ${won(i.perMonth)}\n${i.paid}회 냄 · 남은 ${won(i.remaining)} (${i.remainingMonths}개월)",
+                    fontSize = 13.sp, color = C.accentDark, lineHeight = 19.sp,
+                )
+            }
         }
+
+        OffsetSection(t, onClose)
 
         Text("카테고리", fontSize = 15.sp, fontWeight = FontWeight.Medium)
         prefs.categories.chunked(3).forEach { row ->
@@ -174,6 +184,74 @@ fun UncategorizedScreen(onBack: () -> Unit, openTx: (Long) -> Unit) {
         if (list.isEmpty()) {
             Text("모두 분류했어요", Modifier.padding(24.dp), color = C.sub)
         }
+        LazyColumn(Modifier.padding(horizontal = 16.dp).clip(RoundedCornerShape(18.dp)).background(C.card)) {
+            items(list, key = { it.id }) { t ->
+                Column(Modifier.padding(horizontal = 16.dp)) {
+                    TxRow(t) { openTx(t.id) }
+                    Divider()
+                }
+            }
+        }
+    }
+}
+
+/** 상계: 환불·입금을 원래 결제와 맞붙여 지우거나 금액을 줄인다 */
+@Composable
+private fun OffsetSection(t: Tx, onClose: () -> Unit) {
+    if (!(t.kind == Kind.INCOME || t.kind == Kind.CANCEL || ((t.kind == Kind.PAYMENT || t.kind == Kind.TRANSFER) && !t.cancelled))) return
+    val ctx = LocalContext.current
+    val repo = Repository.get(ctx)
+    var open by remember(t.id) { mutableStateOf(t.kind == Kind.INCOME || t.kind == Kind.CANCEL) }
+    if (!open) {
+        Text("환불·더치페이 입금과 상계하기", color = C.accent, fontSize = 14.sp, modifier = Modifier.clickable { open = true }.padding(vertical = 4.dp))
+        return
+    }
+    val candidates = rememberData(t.id) { r -> Offset.candidates(t, r.between(t.time.minusDays(62), t.time.plusDays(62))).take(8) } ?: return
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(C.ground).padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(
+            if (t.kind == Kind.INCOME || t.kind == Kind.CANCEL) "어느 결제와 상계할까요?" else "어느 환불·입금과 상계할까요?",
+            fontSize = 14.sp, fontWeight = FontWeight.Medium,
+        )
+        Text("금액이 같으면 둘 다 지우고, 돌려받은 돈이 적으면 결제 금액을 그만큼 줄여요.", fontSize = 12.sp, color = C.sub, lineHeight = 17.sp)
+        if (candidates.isEmpty()) Text("앞뒤 두 달 안에 상계할 내역이 없어요", fontSize = 13.sp, color = C.sub)
+        candidates.forEach { c ->
+            Row(
+                Modifier.fillMaxWidth().clickable {
+                    val r = Offset.apply(t, c)
+                    repo.writer.execute {
+                        repo.transaction {
+                            r.update.forEach { repo.update(it) }
+                            r.delete.forEach { repo.delete(it) }
+                        }
+                        repo.changed()
+                    }
+                    onClose()
+                }.padding(vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(c.merchant, fontSize = 14.sp, maxLines = 1)
+                    Text(c.time.format(if (c.timeKnown) MD_HM else MD) + " · " + (c.category ?: "미분류"), fontSize = 12.sp, color = C.sub)
+                }
+                Text(sign(c) + won(c.amount), fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            }
+        }
+    }
+}
+
+/** 상계 안 한 입금·다음 달 환불 모아 보기 */
+@Composable
+fun RefundsScreen(onBack: () -> Unit, openTx: (Long) -> Unit) {
+    val list = rememberData { it.openRefunds() } ?: return
+    Column(Modifier.fillMaxSize()) {
+        TopBar("입금·환불 ${list.size}건", onBack)
+        Text(
+            "눌러서 원래 결제와 상계하세요. 더치페이 입금이면 그 결제 금액이 줄어요. 상계할 필요 없는 입금은 그대로 두면 돼요(지출에 안 들어가요).",
+            fontSize = 13.sp, color = C.sub, lineHeight = 18.sp, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+        )
         LazyColumn(Modifier.padding(horizontal = 16.dp).clip(RoundedCornerShape(18.dp)).background(C.card)) {
             items(list, key = { it.id }) { t ->
                 Column(Modifier.padding(horizontal = 16.dp)) {

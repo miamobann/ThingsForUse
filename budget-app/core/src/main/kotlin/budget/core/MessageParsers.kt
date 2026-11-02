@@ -121,7 +121,7 @@ object NaverPayParser {
 }
 
 /**
- * 농협 입출금 문자. 출금만 기록한다(송금).
+ * 농협 입출금 문자. 출금은 송금, 입금은 상계용 '입금'으로 기록한다.
  *
  * 예:
  * ```
@@ -138,7 +138,7 @@ object NhBankSmsParser {
 
     fun parse(text: String, receivedAt: LocalDateTime): Parsed? {
         val m = HEAD.find(text) ?: return null
-        if (m.groupValues[1] != "출금") return null
+        val income = m.groupValues[1] == "입금"
         val amount = parseAmount(m.groupValues[2]) ?: return null
         if (amount == 0L) return null
         val time = matchTime(SLASH_TIME, text, receivedAt) ?: receivedAt
@@ -154,9 +154,9 @@ object NhBankSmsParser {
 
         return Parsed(
             source = Source.BANK_SMS,
-            kind = Kind.TRANSFER,
+            kind = if (income) Kind.INCOME else Kind.TRANSFER,
             amount = amount,
-            merchant = counterpart,
+            merchant = if (income && counterpart == "농협 출금") "농협 입금" else counterpart,
             time = time,
             raw = text.trim(),
         )

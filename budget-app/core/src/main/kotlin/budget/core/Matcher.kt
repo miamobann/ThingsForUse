@@ -134,8 +134,13 @@ object Matcher {
         // 이미 같은 취소가 들어와 있으면 중복
         window.firstOrNull { it.cancelled && merchantMatches(it, p) && sameDayOrClose(it, p) }?.let { return Decision.Duplicate(it) }
         window.firstOrNull { it.kind == Kind.CANCEL && merchantMatches(it, p) && sameDayOrClose(it, p) }?.let { return Decision.Duplicate(it) }
+        // 같은 달 결제만 자동으로 취소 처리한다. 다음 달에 들어온 취소·환불은 그 달에 따로 남기고,
+        // 사용자가 직접 상계하거나 고친다.
         val target = window
-            .filter { it.kind == Kind.PAYMENT && !it.cancelled && merchantMatches(it, p) }
+            .filter {
+                it.kind == Kind.PAYMENT && !it.cancelled && merchantMatches(it, p) &&
+                    java.time.YearMonth.from(it.time) == java.time.YearMonth.from(p.time)
+            }
             .maxByOrNull { it.time }
         return if (target != null) Decision.Cancel(target) else Decision.Insert
     }

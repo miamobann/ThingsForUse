@@ -34,6 +34,7 @@ private data class HomeData(
     val spent: Long,
     val prevSameDay: Long,
     val uncategorized: Int,
+    val openRefunds: Int,
     val unparsed: Int,
 )
 
@@ -53,6 +54,7 @@ fun HomeScreen(go: (Screen) -> Unit, openTx: (Long) -> Unit) {
             spent = stats.monthTotal(ym),
             prevSameDay = stats.totalUntil(ym.minusMonths(1), today.dayOfMonth),
             uncategorized = repo.uncategorized().size,
+            openRefunds = repo.openRefunds().size,
             unparsed = repo.unparsed().size,
         )
     } ?: return
@@ -71,6 +73,11 @@ fun HomeScreen(go: (Screen) -> Unit, openTx: (Long) -> Unit) {
         if (data.uncategorized > 0) {
             item {
                 Notice("분류 안 된 결제 ${data.uncategorized}건이 있어요", "고르기") { go(Screen.Uncategorized) }
+            }
+        }
+        if (data.openRefunds > 0) {
+            item {
+                Notice("상계하지 않은 입금·환불 ${data.openRefunds}건", "보기") { go(Screen.Refunds) }
             }
         }
         if (data.unparsed > 0) {

@@ -65,6 +65,10 @@ class Repository private constructor(ctx: Context) {
     fun uncategorized(): List<Tx> =
         query("SELECT * FROM tx WHERE category IS NULL AND cancelled = 0 ORDER BY time DESC")
 
+    /** 아직 상계하지 않은 입금·다음 달 환불 */
+    fun openRefunds(): List<Tx> =
+        query("SELECT * FROM tx WHERE kind IN ('INCOME', 'CANCEL') AND cancelled = 0 ORDER BY time DESC")
+
     fun insert(t: Tx): Long = db.insert("tx", null, values(t))
 
     fun update(t: Tx) {
