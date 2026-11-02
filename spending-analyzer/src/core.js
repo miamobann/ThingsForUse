@@ -52,7 +52,7 @@
     return hit;
   }
   function samePG(a, b) { const x = pgOf(a); return x >= 0 && x === pgOf(b); }
-  // 네이버페이 메모 "스토어 - 스텔라이브의 상품명 / 상태:..." 에서 실제 판매자 이름 꺼내기
+  // 네이버페이 메모 "스토어 - 판매자이름의 상품명 / 상태:..." 에서 실제 판매자 이름 꺼내기
   function productName(memo) { return String(memo || '').split(' / ')[0].trim(); }
   function sellerFromMemo(memo) {
     const p = productName(memo);
