@@ -157,7 +157,7 @@ class Repository private constructor(ctx: Context) {
 
     private fun query(sql: String, vararg args: String): List<Tx> {
         val out = mutableListOf<Tx>()
-        db.rawQuery(sql, args).use { c -> while (c.moveToNext()) out += read(c) }
+        db.rawQuery(sql, arrayOf(*args)).use { c -> while (c.moveToNext()) out += read(c) }
         return out
     }
 

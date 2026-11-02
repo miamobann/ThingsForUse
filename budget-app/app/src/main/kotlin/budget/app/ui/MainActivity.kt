@@ -61,6 +61,8 @@ class MainActivity : FragmentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // 잠금을 안 쓰는 동안은 풀린 상태로 시작 (설정에서 잠금을 켜도 바로 잠기지 않고 다음에 열 때부터)
+        if (!Prefs(this).lockEnabled) unlocked = true
         handleIntent(intent)
         setContent {
             BudgetTheme {
