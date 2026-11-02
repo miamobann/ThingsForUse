@@ -1270,7 +1270,7 @@ a.estore:hover { color: var(--accent); border-bottom-color: var(--accent); }
         <label><input type="checkbox" id="foff" ${t.showOff ? 'checked' : ''}> 지출 아닌 것도 보기</label>
       </div>
       ${t.store ? `<div class="filters"><span class="chip">가게: <b>${esc(t.storeName)}</b> · 전체 기간<button id="storeOff" title="가게 보기 끄기">×</button></span></div>` : ''}
-      <div class="filters"><span>${list.length}건 · 지출 합계 <b>${won(total)}</b></span>
+      <div class="filters"><span>${list.length}건${list.some((x) => x.amt === 0) ? ` (지출로 센 건 ${list.filter((x) => x.amt !== 0).length}건, 취소·제외 ${list.filter((x) => x.amt === 0).length}건)` : ''} · 지출 합계 <b>${won(total)}</b></span>
         <span class="muted" style="margin-left:auto">분류를 고치면</span>
         <div class="seg" id="applyTo">${[['one', '이 건만'], ['memo', '같은 메모 전부'], ['store', '같은 가게 전부']].map(([v, l]) => `<button data-v="${v}" class="${UI.applyTo === v ? 'on' : ''}">${l}</button>`).join('')}</div></div>
       <div class="card tablewrap" style="padding:6px 8px"><table><thead><tr>${sortTh('date', '날짜')}<th>시각</th>${sortTh('store', '가게')}${sortTh('amount', '금액', 'num')}${sortTh('cat', '대분류')}<th>세부</th><th>결제</th><th>메모</th><th>출처</th><th></th></tr></thead><tbody>${rows}</tbody></table>
