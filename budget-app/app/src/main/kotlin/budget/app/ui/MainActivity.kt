@@ -53,6 +53,8 @@ sealed interface Screen {
     data object Unparsed : Screen
     data object Refunds : Screen
     data object Recurring : Screen
+    data object NotiLog : Screen
+    data object Duplicates : Screen
 }
 
 class MainActivity : FragmentActivity() {
@@ -140,7 +142,7 @@ class MainActivity : FragmentActivity() {
     private fun App() {
         BackHandler(enabled = screen != Screen.Home) {
             screen = when (screen) {
-                Screen.Unparsed -> Screen.Settings
+                Screen.Unparsed, Screen.NotiLog -> Screen.Settings
                 else -> Screen.Home
             }
         }
@@ -158,6 +160,8 @@ class MainActivity : FragmentActivity() {
                     Screen.Unparsed -> UnparsedScreen(onBack = { screen = Screen.Settings })
                     Screen.Refunds -> RefundsScreen(onBack = { screen = Screen.Home }) { openTx = it }
                     Screen.Recurring -> RecurringScreen(onBack = { screen = Screen.Home })
+                    Screen.NotiLog -> NotiLogScreen(onBack = { screen = Screen.Settings }) { openTx = it }
+                    Screen.Duplicates -> DuplicatesScreen(onBack = { screen = Screen.Home }) { openTx = it }
                 }
             }
             if (screen in listOf(Screen.Home, Screen.Calendar, Screen.Stats, Screen.Settings)) {

@@ -14,7 +14,11 @@ import kotlinx.coroutines.flow.StateFlow
 import java.time.LocalDateTime
 import java.util.concurrent.Executors
 
-private class DbHelper(ctx: Context) : SQLiteOpenHelper(ctx, "budget.db", null, 1) {
+private const val NOTI_LOG_SQL =
+    "CREATE TABLE IF NOT EXISTS noti_log(id INTEGER PRIMARY KEY AUTOINCREMENT, time TEXT NOT NULL, origin TEXT NOT NULL, " +
+        "text TEXT NOT NULL, result TEXT NOT NULL, tx_id INTEGER)"
+
+private class DbHelper(ctx: Context) : SQLiteOpenHelper(ctx, "budget.db", null, 2) {
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
             """CREATE TABLE tx(
@@ -29,12 +33,18 @@ private class DbHelper(ctx: Context) : SQLiteOpenHelper(ctx, "budget.db", null, 
         db.execSQL("CREATE INDEX tx_time ON tx(time)")
         db.execSQL("CREATE TABLE rule(merchant_key TEXT PRIMARY KEY, category TEXT NOT NULL)")
         db.execSQL("CREATE TABLE unparsed(id INTEGER PRIMARY KEY AUTOINCREMENT, time TEXT NOT NULL, origin TEXT NOT NULL, text TEXT NOT NULL)")
+        db.execSQL(NOTI_LOG_SQL)
     }
 
-    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        if (oldVersion < 2) db.execSQL(NOTI_LOG_SQL)
+    }
 }
 
 data class Unparsed(val id: Long, val time: LocalDateTime, val origin: String, val text: String)
+
+/** 받은 결제 알림·문자 원문과 처리 결과 */
+data class NotiLog(val id: Long, val time: LocalDateTime, val origin: String, val text: String, val result: String, val txId: Long?)
 
 /**
  * 앱 데이터 전부. 쓰기는 한 줄짜리 작업 스레드에서만 해서 알림·문자가 동시에 와도 순서대로 처리된다.
@@ -94,6 +104,7 @@ class Repository private constructor(ctx: Context) {
         db.delete("tx", null, null)
         db.delete("rule", null, null)
         db.delete("unparsed", null, null)
+        db.delete("noti_log", null, null)
     }
 
     /**
@@ -151,6 +162,34 @@ class Repository private constructor(ctx: Context) {
             while (c.moveToNext()) out += Unparsed(c.getLong(0), LocalDateTime.parse(c.getString(1)), c.getString(2), c.getString(3))
         }
         return out
+    }
+
+    // ---- 결제 알림 기록 (최근 180일) ----
+
+    fun addLog(origin: String, text: String, result: String, txId: Long?, time: LocalDateTime = LocalDateTime.now()) {
+        db.insert("noti_log", null, ContentValues().apply {
+            put("time", time.toString())
+            put("origin", origin)
+            put("text", text)
+            put("result", result)
+            if (txId == null) putNull("tx_id") else put("tx_id", txId)
+        })
+        db.delete("noti_log", "time < ?", arrayOf(LocalDateTime.now().minusDays(180).toString()))
+    }
+
+    fun logs(limit: Int = 500): List<NotiLog> {
+        val out = mutableListOf<NotiLog>()
+        db.rawQuery("SELECT id, time, origin, text, result, tx_id FROM noti_log ORDER BY id DESC LIMIT $limit", null).use { c ->
+            while (c.moveToNext()) out += NotiLog(
+                c.getLong(0), LocalDateTime.parse(c.getString(1)), c.getString(2), c.getString(3), c.getString(4),
+                if (c.isNull(5)) null else c.getLong(5),
+            )
+        }
+        return out
+    }
+
+    fun deleteLogs() {
+        db.delete("noti_log", null, null)
     }
 
     fun deleteUnparsed(id: Long?) {

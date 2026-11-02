@@ -80,3 +80,25 @@ class RecurringAndCsvTest {
         assertEquals(Kind.TRANSFER, e.parsed.kind)
     }
 }
+
+class DuplicateCheckTest {
+    private fun tx(id: Long, amount: Long, h: Int, m: Int, source: Source, timeKnown: Boolean = true, approval: String? = null) = Tx(
+        id, java.time.LocalDateTime.of(2026, 11, 2, h, m), timeKnown, amount, "가게$id", "가게$id", null, source, Kind.PAYMENT,
+        approvalNo = approval,
+    )
+
+    @Test
+    fun findsCrossSourcePairsOnly() {
+        val txs = listOf(
+            tx(1, 5_000, 10, 0, Source.CARD_NOTI), tx(2, 5_000, 10, 6, Source.MANUAL),        // 다른 출처 6분 → 의심
+            tx(3, 1_500, 8, 0, Source.CARD_FILE, false), tx(4, 1_500, 18, 0, Source.CARD_FILE, false), // 같은 파일 같은 날 → 아님
+            tx(5, 9_000, 12, 0, Source.CARD_NOTI), tx(6, 9_000, 12, 1, Source.CARD_NOTI),      // 같은 출처 1분 → 의심
+            tx(7, 9_000, 15, 0, Source.CARD_NOTI),                                              // 3시간 뒤 같은 금액 → 아님
+            tx(8, 2_000, 9, 0, Source.CARD_FILE, false), tx(9, 2_000, 21, 0, Source.NAVERPAY), // 날짜만 있는 파일 vs 알림 같은 날 → 의심
+            tx(10, 7_000, 9, 0, Source.CARD_FILE, approval = "1"), tx(11, 7_000, 9, 0, Source.CARD_NOTI, approval = "2"), // 승인번호 다름
+        )
+        val keys = DuplicateCheck.suspects(txs).map { it.key }.toSet()
+        assertEquals(setOf("1-2", "5-6", "8-9"), keys)
+        assertEquals(setOf("1-2", "8-9"), DuplicateCheck.suspects(txs, dismissed = setOf("5-6")).map { it.key }.toSet())
+    }
+}

@@ -48,8 +48,10 @@ object Ingest {
             }
             isCardApp(pkg) -> {
                 val p = HyundaiCardMessageParser.parse(title, text, postedAt, Source.CARD_NOTI)
-                if (p != null) record(ctx, p) else if (text.contains("원")) {
-                    repo.addUnparsed("현대카드 알림", listOfNotNull(title, text).joinToString("\n"), postedAt)
+                val joined = listOfNotNull(title, text).joinToString("\n")
+                if (p != null) record(ctx, p, "현대카드 알림", joined) else if (text.contains("원")) {
+                    repo.addUnparsed("현대카드 알림", joined, postedAt)
+                    repo.addLog("현대카드 알림", joined, "읽지 못함", null, postedAt)
                     repo.changed()
                 }
             }
@@ -57,8 +59,9 @@ object Ingest {
                 val joined = listOfNotNull(title, text).joinToString("\n")
                 if (!joined.contains("결제")) return
                 val p = NaverPayParser.parse(title, text, postedAt)
-                if (p != null) record(ctx, p) else if (joined.contains("원")) {
+                if (p != null) record(ctx, p, "네이버페이 알림", joined) else if (joined.contains("원")) {
                     repo.addUnparsed("네이버페이 알림", joined, postedAt)
+                    repo.addLog("네이버페이 알림", joined, "읽지 못함", null, postedAt)
                     repo.changed()
                 }
             }
@@ -70,15 +73,17 @@ object Ingest {
         when {
             NhBankSmsParser.looksLikeNh(body) -> {
                 val p = NhBankSmsParser.parse(body, receivedAt)
-                if (p != null) record(ctx, p) else if (body.contains("출금")) {
+                if (p != null) record(ctx, p, "농협 문자", body) else if (body.contains("출금")) {
                     repo.addUnparsed("농협 문자", body, receivedAt)
+                    repo.addLog("농협 문자", body, "읽지 못함", null, receivedAt)
                     repo.changed()
                 }
             }
             HyundaiCardMessageParser.looksLikeCard(body) -> {
                 val p = HyundaiCardMessageParser.parse(null, body, receivedAt, Source.CARD_SMS)
-                if (p != null) record(ctx, p) else {
+                if (p != null) record(ctx, p, "현대카드 문자", body) else {
                     repo.addUnparsed("현대카드 문자", body, receivedAt)
+                    repo.addLog("현대카드 문자", body, "읽지 못함", null, receivedAt)
                     repo.changed()
                 }
             }
@@ -86,12 +91,22 @@ object Ingest {
     }
 
     /** 실시간으로 들어온 결제 한 건 처리 (작업 스레드에서 호출) */
-    fun record(ctx: Context, p: Parsed) {
+    fun record(ctx: Context, p: Parsed, origin: String = p.source.label, text: String = p.raw) {
         val repo = Repository.get(ctx)
         val prefs = Prefs(ctx)
         val before = monthSpent(repo, prefs, YearMonth.now())
         val nearby = repo.between(p.time.minusDays(3), p.time.plusDays(3))
-        val saved = apply(repo, p, Matcher.decide(p, nearby))
+        val decision = Matcher.decide(p, nearby)
+        val saved = apply(repo, p, decision)
+        val (result, txId) = when (decision) {
+            Matcher.Decision.Insert -> "새로 기록" to saved?.id
+            is Matcher.Decision.Duplicate -> "이미 기록된 결제라 건너뜀" to decision.existing.id
+            is Matcher.Decision.AttachNaverPay -> "카드 결제와 합침 (가게 이름: ${Merchants.displayName(decision.merchant)})" to decision.existing.id
+            is Matcher.Decision.AttachCard -> "네이버페이 결제와 합침" to decision.existing.id
+            is Matcher.Decision.Cancel -> "결제 취소 반영" to decision.target.id
+            Matcher.Decision.Ignore -> "기록 안 함 (취소된 임시 승인)" to null
+        }
+        repo.addLog(origin, text, result, txId, p.time)
         repo.changed()
 
         if (saved != null && saved.category == null && !saved.cancelled) askCategory(ctx, saved)

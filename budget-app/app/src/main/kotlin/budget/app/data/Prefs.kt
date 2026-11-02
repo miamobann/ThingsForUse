@@ -30,6 +30,11 @@ class Prefs(ctx: Context) {
         get() = p.getStringSet("hidden_recurring", emptySet())!!.toSet()
         set(v) = p.edit().putStringSet("hidden_recurring", v).apply()
 
+    /** '중복 아님'으로 표시한 쌍 (DuplicateCheck.keyOf) */
+    var dismissedDuplicates: Set<String>
+        get() = p.getStringSet("dismissed_dup", emptySet())!!.toSet()
+        set(v) = p.edit().putStringSet("dismissed_dup", v).apply()
+
     fun alertsSent(ym: YearMonth): Set<Int> =
         p.getStringSet("alerts_$ym", emptySet())!!.mapNotNull { it.toIntOrNull() }.toSet()
 

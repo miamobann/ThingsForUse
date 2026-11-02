@@ -205,6 +205,11 @@ fun SettingsScreen(go: (Screen) -> Unit) {
 
         SectionTitle("기타")
         Panel {
+            Row(Modifier.fillMaxWidth().clickable { go(Screen.NotiLog) }.padding(vertical = 8.dp)) {
+                Text("받은 결제 알림 기록", fontSize = 15.sp, modifier = Modifier.weight(1f))
+                Text("보기 ›", fontSize = 14.sp, color = C.accent)
+            }
+            Divider()
             Row(Modifier.fillMaxWidth().clickable { go(Screen.Unparsed) }.padding(vertical = 8.dp)) {
                 Text("읽지 못한 알림·문자", fontSize = 15.sp, modifier = Modifier.weight(1f))
                 Text("보기 ›", fontSize = 14.sp, color = C.accent)

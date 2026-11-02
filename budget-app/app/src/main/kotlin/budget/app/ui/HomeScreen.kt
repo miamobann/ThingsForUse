@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import budget.app.data.Prefs
 import budget.core.BudgetStatus
+import budget.core.DuplicateCheck
 import budget.core.Recurring
 import budget.core.RecurringFinder
 import budget.core.Stats
@@ -39,6 +40,7 @@ private data class HomeData(
     val openRefunds: Int,
     val unparsed: Int,
     val recurring: List<Recurring>,
+    val duplicates: Int,
 )
 
 @Composable
@@ -61,6 +63,7 @@ fun HomeScreen(go: (Screen) -> Unit, openTx: (Long) -> Unit) {
             openRefunds = repo.openRefunds().size,
             unparsed = repo.unparsed().size,
             recurring = recurring,
+            duplicates = DuplicateCheck.suspects(repo.all(), prefs.dismissedDuplicates).size,
         )
     } ?: return
 
@@ -84,6 +87,9 @@ fun HomeScreen(go: (Screen) -> Unit, openTx: (Long) -> Unit) {
                     "보기",
                 ) { go(Screen.Recurring) }
             }
+        }
+        if (data.duplicates > 0) {
+            item { Notice("중복 의심 결제 ${data.duplicates}건이 있어요", "확인") { go(Screen.Duplicates) } }
         }
         if (data.uncategorized > 0) {
             item {
