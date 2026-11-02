@@ -419,14 +419,14 @@
     const k = storeKey(r.store);
     let mem = agent ? null : state.memory[k];
     if (!mem && agent) { const sk = storeKey(sellerFromMemo(r.memo)); if (sk) mem = state.memory[sk] || null; }
-    // 단어 규칙: 가게·메모(상품명)에 그 단어가 들어 있으면 (기억·건별 분류가 없을 때만)
-    const rule = !mem && !(ov && ov.cat) ? matchRule(r, state.rules) : null;
-    const src = mem || rule;
-    let cat = (ov && ov.cat) || r.cat || (src && src.cat) || '';
+    // 단어 규칙이 가게 기억보다 먼저 (같은 가게라도 상품명이 다르면 다르게: 가계부 앱과 같은 순서)
+    const rule = !(ov && ov.cat) ? matchRule(r, state.rules) : null;
+    let cat = (ov && ov.cat) || r.cat || (rule && rule.cat) || (mem && mem.cat) || '';
     let sub = '';
     if (ov && ov.sub && (!ov.cat || ov.cat === cat)) sub = ov.sub;
-    else if (src && src.sub && src.cat === cat) sub = src.sub;
-    return { cat, sub, agent, key: k, byRule: !!(rule && !(ov && ov.cat)) };
+    else if (rule && rule.sub && rule.cat === cat) sub = rule.sub;
+    else if (mem && mem.sub && mem.cat === cat) sub = mem.sub;
+    return { cat, sub, agent, key: k, byRule: !!(rule && rule.cat === cat && !(ov && ov.cat)) };
   }
 
   function matchRule(r, rules) {

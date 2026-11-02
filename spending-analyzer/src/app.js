@@ -146,6 +146,11 @@
 
   // ---------- 공통 UI ----------
   const tip = document.createElement('div'); tip.className = 'tip'; document.body.appendChild(tip);
+  // 누르면 화면을 다시 그려서 마우스 아래 요소가 사라진다(mouseleave가 안 옴) → 클릭·스크롤·다시 그릴 때 숨김
+  const hideTip = () => { tip.style.display = 'none'; };
+  document.addEventListener('click', hideTip, true);
+  document.addEventListener('scroll', hideTip, true);
+  document.addEventListener('mousemove', (e) => { if (tip.style.display === 'block' && !e.target.closest('[data-tip]')) hideTip(); });
   function bindTips(root) {
     root.querySelectorAll('[data-tip]').forEach((el) => {
       el.addEventListener('mousemove', (e) => {
@@ -619,7 +624,7 @@
           <input type="text" class="tadd" placeholder="+ 세부 추가" size="10"></div></div>`).join('')}
         <div class="filters" style="margin-top:12px"><input type="text" id="newCat" placeholder="새 대분류 이름"><button class="btn" id="addCat">대분류 추가</button></div>
       </div>
-      <div class="card"><h2>단어 규칙 · ${S.rules.length}개</h2><p class="sub">가게 이름이나 상품명에 이 단어가 들어 있으면 이 분류로 넣어요. 가게별 기억이나 건별 분류가 있으면 그쪽이 먼저예요.</p>
+      <div class="card"><h2>단어 규칙 · ${S.rules.length}개</h2><p class="sub">가게 이름이나 상품명에 이 단어가 들어 있으면 이 분류로 넣어요. 가게별 기억보다 먼저 적용돼서, 같은 가게라도 상품명으로 나눌 수 있어요. 한 건만 고친 분류는 이보다 먼저예요. 가계부 앱과 같은 목록을 써요.</p>
         ${S.rules.length ? `<table><tbody>${S.rules.map((r, i) => `<tr><td><b>${esc(r.kw)}</b></td><td>${esc(r.cat)}${r.sub ? ` · ${esc(r.sub)}` : ''}</td><td class="num">${D.items.filter((x) => x.c.byRule && C.matchRule(x.r, [r])).length}건</td><td><button class="btn small rdel" data-i="${i}">삭제</button></td></tr>`).join('')}</tbody></table>` : '<p class="muted">아직 없어요.</p>'}
       </div>`;
   }
@@ -637,7 +642,7 @@
       const cs = $('.ccat', tr);
       cs.onchange = () => { $('.csub', tr).innerHTML = subOptions(cs.value, ''); };
       $('.crule', tr).onclick = () => {
-        const kw = $('.ckw', tr).value.trim(); const cat = cs.value; const sub = $('.csub', tr).value;
+        const kw = $('.ckw', tr).value.trim().toLowerCase(); const cat = cs.value; const sub = $('.csub', tr).value;
         if (!kw) return toast('단어를 적어주세요');
         if (!cat) return toast('대분류를 골라주세요');
         S.rules = S.rules.filter((r) => r.kw !== kw); S.rules.push({ kw, cat, sub });
@@ -856,6 +861,7 @@
   // ---------- 렌더 ----------
   const TABS = [['dash', '대시보드'], ['table', '내역'], ['classify', '분류하기'], ['check', '점검'], ['files', '파일·설정']];
   function render() {
+    hideTip();
     const nav = $('nav');
     const pend = D && D.items.length ? pending() : { groups: [], agentRows: [] };
     const dupN = D && D.items.length ? C.findDuplicates(D.rows).filter((d) => !S.dismissed[d.key]).length : 0;

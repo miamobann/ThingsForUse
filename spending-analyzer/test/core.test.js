@@ -174,3 +174,13 @@ test('수입·저축·상계: 귀속월, 연결된 입금은 결제에서 빼기
   assert.deepEqual(f.byMonth['2026-11'], { income: 800000, saving: 0 });
   assert.deepEqual(f.byMonth['2026-10'], { income: 0, saving: 300000 });
 });
+
+test('단어 규칙이 가게 기억보다 먼저, 대소문자 무시', () => {
+  const st = { overrides: {}, memory: { chzzk: { cat: '여가', sub: '후원·팬활동' } }, rules: [{ kw: '정기구독', cat: '구독', sub: '멤버십' }, { kw: 'steam', cat: '여가', sub: '' }] };
+  const r = (store, memo, extra = {}) => ({ id: 'x', store, memo, ...extra });
+  assert.deepEqual(C.classify(r('CHZZK', '1개월 정기구독 / 상태:결제완료'), st).cat, '구독');
+  assert.equal(C.classify(r('CHZZK', '치즈 충전'), st).sub, '후원·팬활동');
+  const s2 = { ...st, memory: { ...st.memory, steam: { cat: '여가', sub: '게임' } } };
+  assert.deepEqual([C.classify(r('STEAM', ''), s2).cat, C.classify(r('STEAM', ''), s2).sub], ['여가', '게임']); // 규칙에 세부가 없으면 기억의 세부
+  assert.equal(C.classify(r('CHZZK', '정기구독', {}), { ...st, overrides: { x: { cat: '여가' } } }).cat, '여가'); // 건별이 제일 먼저
+});
