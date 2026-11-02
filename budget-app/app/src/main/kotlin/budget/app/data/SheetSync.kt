@@ -91,7 +91,7 @@ object SheetSync {
                     if (id in waiting || category == null) continue
                     val t = repo.byId(id) ?: continue
                     if (t.category != category) {
-                        repo.update(t.copy(category = category), fromSync = true)
+                        repo.update(budget.core.MoneyFlow.withCategory(t, category), fromSync = true)
                         changed++
                     }
                 }
