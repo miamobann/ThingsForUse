@@ -92,3 +92,9 @@ test('할부: 첫 회차는 다음 달', () => {
   const i = C.installment({ date: '2026-08-10', amount: 1200000, inst: 6 }, '2026-10');
   assert.deepEqual([i.monthly, i.left, i.leftAmount], [200000, 4, 800000]);
 });
+
+test('실시간 내역 시작 하루 전 명세서 결제도 겹치면 합침 (마이시큐리티 10/1 ↔ 10/2)', () => {
+  const s = C.parseFile('s.xls', stmt([['2026년 10월 01일', '마이시큐리티', '600']]));
+  const r = C.parseFile('r.xls', rt([['2026년 10월 02일', '01:09', '마이시큐리티', '600', '777']]));
+  assert.equal(C.combine([s, r]).rows.length, 1);
+});

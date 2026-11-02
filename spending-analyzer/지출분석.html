@@ -396,7 +396,7 @@ details summary { cursor: pointer; font-weight: 600; margin: 4px 0; }
       const rtFrom = rt.map((r) => r.date).sort()[0];
       const used = new Set();
       const drop = new Set();
-      for (const s of rows.filter((r) => r.source === '카드 파일(명세서)' && r.date >= rtFrom)) {
+      for (const s of rows.filter((r) => r.source === '카드 파일(명세서)' && dayNum(r.date) >= dayNum(rtFrom) - 1)) {
         const cand = rt.filter((r) => !used.has(r.id) && Math.abs(dayNum(r.date) - dayNum(s.date)) <= 1 && r.amount === s.amount &&
           (similarStore(r.rawStore, s.rawStore) || (isAgentOnly(r.rawStore) && isAgentOnly(s.rawStore))));
         let hit = cand[0];
