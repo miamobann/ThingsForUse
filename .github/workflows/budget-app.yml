@@ -30,16 +30,39 @@ jobs:
       - name: 핵심 로직 테스트
         run: ./gradlew :core:test --no-daemon
 
-      - name: APK 빌드
-        run: ./gradlew :app:assembleRelease --no-daemon
+      - name: APK 빌드 (Min용 + 범용판)
+        run: ./gradlew :app:assemblePersonalRelease :app:assembleShareRelease --no-daemon
 
       - name: APK 이름 정리
-        run: cp app/build/outputs/apk/release/app-release.apk budget-app.apk
+        run: |
+          cp app/build/outputs/apk/personal/release/app-personal-release.apk budget-app.apk
+          cp app/build/outputs/apk/share/release/app-share-release.apk gagyebu-share.apk
+
+      # 다른 사람에게 줄 zip: 가계부.apk + 분석 프로그램(앱스 스크립트) + README
+      - name: 범용판 zip 만들기
+        run: |
+          rm -rf out && mkdir -p "out/가계부/분석 프로그램"
+          cp gagyebu-share.apk "out/가계부/가계부.apk"
+          cp share/README.md "out/가계부/README.md"
+          cp apps-script/Sync.gs "out/가계부/분석 프로그램/Sync.gs"
+          if [ -d share/analyzer ]; then cp -r share/analyzer/. "out/가계부/분석 프로그램/"; fi
+          # 파이썬 zipfile은 한글 파일 이름에 UTF-8 표시를 붙여서 윈도우에서도 이름이 안 깨진다
+          python3 -c "
+          import os, zipfile
+          with zipfile.ZipFile('gagyebu.zip', 'w', zipfile.ZIP_DEFLATED) as z:
+              for root, _, files in os.walk('out'):
+                  for f in files:
+                      p = os.path.join(root, f)
+                      z.write(p, os.path.relpath(p, 'out'))
+          "
+          unzip -l gagyebu.zip
 
       - uses: actions/upload-artifact@v4
         with:
           name: budget-app-apk
-          path: budget-app/budget-app.apk
+          path: |
+            budget-app/budget-app.apk
+            budget-app/gagyebu.zip
 
       # 폰에서 바로 받을 수 있게 '가계부 앱 최신' 릴리스에 올린다 (매번 교체)
       - name: 최신 설치 파일 릴리스
@@ -50,4 +73,14 @@ jobs:
           gh release create budget-app-latest budget-app.apk \
             --title "가계부 앱 최신 (빌드 ${{ github.run_number }})" \
             --notes "브랜치 ${{ github.ref_name }} · 커밋 ${{ github.sha }}. 폰에서 budget-app.apk를 받아 설치하세요." \
+            --target ${{ github.sha }} --prerelease
+
+      - name: 범용판 zip 릴리스
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete gagyebu-share-latest --yes --cleanup-tag || true
+          gh release create gagyebu-share-latest gagyebu.zip \
+            --title "가계부 범용판 zip (빌드 ${{ github.run_number }})" \
+            --notes "다른 사람에게 줄 zip. 안에 가계부.apk, 분석 프로그램(앱스 스크립트), README.md가 있어요." \
             --target ${{ github.sha }} --prerelease
