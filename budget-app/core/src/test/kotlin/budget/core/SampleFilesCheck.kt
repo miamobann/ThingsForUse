@@ -61,6 +61,7 @@ class AppCsvSampleCheck {
         println("decisions(서로 비교)=$counts")
         val preview = ImportPreview.simulate(r.rows.map { it.parsed.copy(cancelled = false) }, emptyList(), independentRows = true)
         println("빈 앱에 넣으면 추가 ${preview.added.size}건")
+        RecurringFinder.find(txs, java.time.LocalDate.of(2026, 11, 2)).forEach { println("고정: ${if (it.subscription) "구독" else "생활"} [${it.category}] ${it.merchant} ${it.amount} 매달 ${it.day}일 (${it.months}달) 이번달=${it.paidThisMonth}") }
         DuplicateCheck.suspects(txs).forEach { println("중복 의심: ${it.a.time} ${it.a.merchant}(${it.a.source}) / ${it.b.time} ${it.b.merchant}(${it.b.source}) ${it.a.amount}") }
     }
 }

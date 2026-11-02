@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -44,31 +46,53 @@ fun RecurringScreen(onBack: () -> Unit) {
         )
     } ?: return
 
-    Column(Modifier.fillMaxSize()) {
-        TopBar("고정 지출 ${list.size}건", onBack)
-        Text(
-            "최근 몇 달 동안 매달 비슷한 금액으로 한 번씩 나간 결제예요. 남은 금액 ${won(RecurringFinder.remaining(list))} · 한 달 합계 ${won(list.sumOf { it.amount })}",
-            fontSize = 13.sp, color = C.sub, lineHeight = 18.sp, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
-        )
-        if (list.isEmpty()) {
-            Panel { Text("아직 찾은 고정 지출이 없어요. 두 달 이상 기록이 쌓이면 보여요.", color = C.sub, fontSize = 14.sp) }
+    val living = list.filter { !it.subscription }
+    val subs = list.filter { it.subscription }
+    fun hide(r: Recurring) {
+        hidden = hidden + r.key
+        prefs.hiddenRecurring = hidden
+    }
+
+    LazyColumn(Modifier.fillMaxSize()) {
+        item { TopBar("매달 나가는 돈 ${list.size}건", onBack) }
+        item {
+            Text(
+                "최근 몇 달 동안 매달 비슷한 날, 비슷한 금액으로 나간 결제예요. 한 가게에 구독이 여러 개면 상품명(없으면 금액)별로 나눠 봐요.",
+                fontSize = 13.sp, color = C.sub, lineHeight = 18.sp, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+            )
         }
-        LazyColumn(Modifier.padding(horizontal = 16.dp).clip(RoundedCornerShape(18.dp)).background(C.card)) {
-            items(list, key = { it.key }) { r ->
-                RecurringRow(r, today) {
-                    hidden = hidden + r.key
-                    prefs.hiddenRecurring = hidden
+        if (list.isEmpty()) {
+            item { Panel { Text("아직 찾은 게 없어요. 두 달 이상 기록이 쌓이면 보여요.", color = C.sub, fontSize = 14.sp) } }
+        }
+        listOf(
+            Triple("고정 지출", "집세·관리비·통신비·보험처럼 생활에 쓰는 돈", living),
+            Triple("구독", "멤버십·정기구독처럼 끊을 수 있는 것", subs),
+        ).forEach { (title, desc, group) ->
+            if (group.isEmpty()) return@forEach
+            item {
+                SectionTitle("$title ${group.size}건 · 한 달 ${won(group.sumOf { it.amount })}")
+                Text(
+                    "$desc · 이번 달 남은 ${won(RecurringFinder.remaining(group))}",
+                    fontSize = 12.sp, color = C.sub, modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 8.dp),
+                )
+            }
+            items(group, key = { it.key }) { r ->
+                Column(Modifier.padding(horizontal = 16.dp).background(C.card)) {
+                    RecurringRow(r, today) { hide(r) }
+                    Divider()
                 }
-                Divider()
             }
         }
         if (hidden.isNotEmpty()) {
-            Text(
-                "뺀 가게 ${hidden.size}곳 다시 보기", color = C.accent, fontSize = 14.sp,
-                modifier = Modifier.clickable { hidden = emptySet(); prefs.hiddenRecurring = emptySet() }
-                    .padding(horizontal = 20.dp, vertical = 14.dp),
-            )
+            item {
+                Text(
+                    "뺀 것 ${hidden.size}개 다시 보기", color = C.accent, fontSize = 14.sp,
+                    modifier = Modifier.clickable { hidden = emptySet(); prefs.hiddenRecurring = emptySet() }
+                        .padding(horizontal = 20.dp, vertical = 14.dp),
+                )
+            }
         }
+        item { Spacer(Modifier.height(24.dp)) }
     }
 }
 
@@ -85,7 +109,7 @@ private fun RecurringRow(r: Recurring, today: LocalDate, onHide: () -> Unit) {
             }
             Text(status, fontSize = 12.sp, color = if (r.paidThisMonth) C.sub else C.accentDark)
             Text(
-                "고정 지출 아님", fontSize = 12.sp, color = C.sub,
+                "매달 나가는 돈 아님", fontSize = 12.sp, color = C.sub,
                 modifier = Modifier.clickable(onClick = onHide).padding(top = 4.dp),
             )
         }

@@ -112,10 +112,11 @@ fun HomeScreen(go: (Screen) -> Unit, openTx: (Long) -> Unit) {
             if (data.unparsed > 0) add(Triple("읽지 못한 알림 ${data.unparsed}건", "보기", Screen.Unparsed))
             if (data.recurring.isNotEmpty()) {
                 val left = data.recurring.filter { !it.paidThisMonth }
+                val (subs, living) = left.partition { it.subscription }
                 add(
                     Triple(
-                        if (left.isEmpty()) "고정 지출 ${data.recurring.size}건 모두 나갔어요"
-                        else "남은 고정 지출 ${left.size}건 · ${won(RecurringFinder.remaining(data.recurring))}",
+                        if (left.isEmpty()) "고정 지출·구독 ${data.recurring.size}건 모두 나갔어요"
+                        else "이번 달 남은 고정 지출 ${living.size}건 · 구독 ${subs.size}건 · ${won(RecurringFinder.remaining(data.recurring))}",
                         "보기", Screen.Recurring,
                     )
                 )

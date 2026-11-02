@@ -54,6 +54,40 @@ class RecurringAndCsvTest {
     }
 
     @Test
+    fun splitsSeveralSubscriptionsAtOneStore() {
+        val today = LocalDate.of(2026, 11, 2)
+        fun sub(name: String, amount: Long, m: Int, d: Int, memo: String) =
+            pay(name, amount, 2026, m, d).copy(memo = "$memo / 상태:결제완료 / 종류:CONTENTS")
+        val txs = (8..10).flatMap { m ->
+            listOf(
+                sub("CHZZK", 4_900, m, 1, "시라유키 히나 1개월 해둥이 정기구독"),
+                sub("CHZZK", 4_900, m, 8, "아야츠노 유니 1개월 아루냥 정기구독"),
+                sub("CHZZK", 11_000, m, 15, "치즈 충전하기"),
+                sub("CHZZK", 6_000, m, 25, "치즈 충전하기"),
+                pay("구글페이먼트코리아 유한회사", 990, 2026, m, 28),
+                pay("구글페이먼트코리아 유한회사", 14_900, 2026, m, 17),
+            )
+        } + pay("구글페이먼트코리아 유한회사", 119_000, 2026, 9, 30)
+        val found = RecurringFinder.find(txs, today).map { it.merchant }.toSet()
+        assertTrue("CHZZK · 시라유키 히나 1개월 해둥이 정기구독" in found)
+        assertTrue("CHZZK · 아야츠노 유니 1개월 아루냥 정기구독" in found)
+        assertTrue(found.none { it.contains("치즈 충전") })
+        assertTrue("구글페이먼트코리아 유한회사 · 990원" in found)
+        assertTrue("구글페이먼트코리아 유한회사 · 14900원" in found)
+        assertEquals(4, found.size)
+    }
+
+    @Test
+    fun livingVersusSubscription() {
+        assertFalse(RecurringFinder.isLiving("구독", "SKT"))
+        assertTrue(RecurringFinder.isLiving("생활", "아무 가게"))
+        assertTrue(RecurringFinder.isLiving(null, "KT 통신요금"))
+        assertTrue(RecurringFinder.isLiving("기타", "OO아파트 관리비"))
+        assertTrue(RecurringFinder.isLiving(Categories.TRANSFER, "집주인"))
+        assertFalse(RecurringFinder.isLiving("여가", "CHZZK"))
+    }
+
+    @Test
     fun readsAppCsv() {
         val csv = "﻿id,날짜,시각,금액,가게명,원래가게명,카테고리,결제수단,할부,송금여부,지출포함여부,취소됨,메모,출처\r\n" +
             "1,2026-10-15,15:20,29000,ChatGPT,\"NICE_통신판매 - 나이스정보통신(대리점)\",구독,현대카드,,N,Y,N,,카드 알림\r\n" +
