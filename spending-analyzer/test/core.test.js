@@ -152,3 +152,25 @@ test('백업의 건별 분류를 새 id로 옮기기 (날짜·시각·금액·�
   assert.equal(m.moved, 2);
   assert.equal(m.lost, 1); // 지문 없는 건은 그대로 둔다
 });
+
+test('수입·저축·상계: 귀속월, 연결된 입금은 결제에서 빼기', () => {
+  const head = C.CSV_COLS.concat(C.EXTRA_COLS);
+  const row = (o) => head.map((h) => o[h] == null ? '' : String(o[h]));
+  const base = { 지출포함여부: 'Y', 취소됨: 'N', 송금여부: 'N' };
+  const csv = [head,
+    row({ ...base, id: '1', 날짜: '2026-10-05', 금액: 40000, 가게명: '고깃집', 카테고리: '식비', 종류: '결제' }),
+    row({ ...base, id: '2', 날짜: '2026-10-06', 금액: -30000, 가게명: '친구', 카테고리: '돌려받은 돈', 지출포함여부: 'N', 종류: '입금', 상계대상: '1' }),
+    row({ ...base, id: '3', 날짜: '2026-10-07', 금액: -5000, 가게명: '가게', 카테고리: '쇼핑', 종류: '환불' }),
+    row({ ...base, id: '4', 날짜: '2026-10-28', 금액: -800000, 가게명: '회사', 카테고리: '수입', 지출포함여부: 'N', 종류: '입금', 귀속월: '2026-11' }),
+    row({ ...base, id: '5', 날짜: '2026-10-29', 금액: 300000, 가게명: '적금', 카테고리: '저축', 지출포함여부: 'N', 종류: '출금' }),
+    row({ ...base, id: '6', 날짜: '2026-10-08', 금액: 50000, 가게명: '옷', 카테고리: '쇼핑', 종류: '결제' }),
+    row({ ...base, id: '7', 날짜: '2026-10-09', 금액: -70000, 가게명: '친구', 카테고리: '돌려받은 돈', 지출포함여부: 'N', 종류: '입금', 상계대상: '6' }),
+  ].map((r) => r.join(',')).join('\n');
+  const { rows } = C.combine([C.parseFile('가계부_내역_전체.csv', csv)]);
+  const amt = Object.fromEntries(rows.map((r) => [r.id, C.spendAmount(r)]));
+  assert.deepEqual(amt, { 1: 10000, 2: 0, 3: -5000, 4: 0, 5: 0, 6: 0, 7: 0 }); // 6: 0 아래로 안 내려감
+  const f = C.monthFlow(rows);
+  assert.equal(f.start, '2026-11');
+  assert.deepEqual(f.byMonth['2026-11'], { income: 800000, saving: 0 });
+  assert.deepEqual(f.byMonth['2026-10'], { income: 0, saving: 300000 });
+});

@@ -16,7 +16,7 @@
     '기타': ['선물·경조사', '기타'],
   };
   // 지출이 아닌 돈의 이동 (가계부 앱과 같은 값)
-  const NOT_SPENDING_CATS = ['카드대금', '현금인출', '입금'];
+  const NOT_SPENDING_CATS = ['카드대금', '현금인출', '입금', '수입', '돌려받은 돈', '내 계좌 이동', '저축'];
 
   // ---------- 가게 이름 (가계부 앱 Merchants.kt 와 같은 규칙) ----------
   const PAYMENT_AGENTS = [
@@ -104,6 +104,8 @@
     row.push(f); if (row.some((x) => x !== '')) rows.push(row);
     return rows;
   }
+  // 수입 기록 뒤로 붙은 열 (없으면 빈칸): 종류 = 결제/환불/출금/입금, 상계대상 = 연결된 결제 id, 귀속월 = YYYY-MM
+  const EXTRA_COLS = ['종류', '상계대상', '귀속월'];
   const CSV_COLS = ['id', '날짜', '시각', '금액', '가게명', '원래가게명', '카테고리', '결제수단', '할부', '송금여부', '지출포함여부', '취소됨', '메모', '출처'];
   function toInt(s) {
     const n = parseInt(String(s || '').replace(/[,\s원]/g, ''), 10);
@@ -116,7 +118,7 @@
     if (!rows.length) throw new Error('빈 파일이에요');
     const head = rows[0].map((h) => h.trim());
     const idx = {};
-    CSV_COLS.forEach((c) => { idx[c] = head.indexOf(c); });
+    CSV_COLS.concat(EXTRA_COLS).forEach((c) => { idx[c] = head.indexOf(c); });
     if (idx['날짜'] < 0 || idx['금액'] < 0) throw new Error('가계부 CSV 형식이 아니에요 (날짜·금액 열이 없음)');
     const get = (r, c) => (idx[c] >= 0 ? (r[idx[c]] || '').trim() : '');
     const out = [];
@@ -144,6 +146,7 @@
         canceled: get(r, '취소됨') === 'Y',
         memo: get(r, '메모'),
         source: get(r, '출처') || 'CSV',
+        kind: get(r, '종류'), offsetTo: get(r, '상계대상'), incomeYM: get(r, '귀속월'),
       });
     });
     return { rows: out, problems };
@@ -399,6 +402,8 @@
         report.refundOfCanceled.push({ date: r.date, store: r.store, amount: r.amount });
       }
     }
+    // 5) 상계: 환불·입금이 가리키는 결제는 그만큼 줄여서 센다 (행은 그대로 둔다)
+    applyOffsets(rows);
     rows.sort((a, b) => (a.date + (a.time || '')).localeCompare(b.date + (b.time || '')));
     return { rows, report };
   }
@@ -431,11 +436,25 @@
   }
 
   /** 합계에 넣을 금액. 취소·지출 아님·지출 제외는 0. 송금 제외 옵션. */
+  function applyOffsets(rows) {
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    for (const r of rows) delete r.offset;
+    for (const r of rows) {
+      if (!r.offsetTo || r.canceled) continue;
+      const t = byId.get(r.offsetTo);
+      if (t) t.offset = (t.offset || 0) + Math.abs(r.amount);
+    }
+  }
+  /** 상계를 뺀 결제 금액 (0 아래로 안 내려감) */
+  function netAmount(r) {
+    return r.amount > 0 && r.offset ? Math.max(0, r.amount - r.offset) : r.amount;
+  }
   function spendAmount(r, opts) {
     if (r.canceled || !r.include) return 0;
+    if (r.offsetTo) return 0; // 결제에 연결된 환불·입금은 결제 쪽에서 이미 뺐다
     if (NOT_SPENDING_CATS.includes(r.cat)) return 0;
     if (opts && opts.excludeTransfer && (r.transfer || r.cat === '송금')) return 0;
-    return r.amount;
+    return netAmount(r);
   }
 
   // ---------- 할부 ----------
@@ -596,6 +615,23 @@
     return { overrides: out, moved, lost };
   }
 
+  // ---------- 수입·저축 ----------
+  /** 달별 수입(귀속월 기준)·저축(실제 달). start = 수입이 처음 기록된 달 */
+  function monthFlow(rows) {
+    const m = {};
+    const at = (ym) => (m[ym] = m[ym] || { income: 0, saving: 0 });
+    let start = '';
+    for (const r of rows) {
+      if (r.canceled) continue;
+      if (r.cat === '수입') {
+        const ym = /^\d{4}-\d{2}$/.test(r.incomeYM || '') ? r.incomeYM : r.date.slice(0, 7);
+        at(ym).income += Math.abs(r.amount);
+        if (!start || ym < start) start = ym;
+      } else if (r.cat === '저축') at(r.date.slice(0, 7)).saving += Math.abs(r.amount);
+    }
+    return { byMonth: m, start };
+  }
+
   // ---------- 가계부 앱용 CSV 내보내기 ----------
   /** 앱 CSV와 같은 14열. 출처·결제수단은 앱 라벨로, 원래가게명은 카드 쪽 이름 (앱이 나중에 카드 파일과 중복 거를 때 씀) */
   function appSource(r) {
@@ -625,8 +661,8 @@
   const api = {
     DEFAULT_TREE, NOT_SPENDING_CATS, WEEKDAYS,
     displayName, storeKey, isAgentOnly, similarStore, productName, sellerFromMemo, matchRule,
-    CSV_COLS, parseCSV, parseAppCSV, parseAppRows, rangeLabel, parseFile, parseHyundaiStatement, parseHyundaiRealtime, htmlRows,
-    combine, classify, spendAmount, installment, analyze, findRecurring, findDuplicates,
+    CSV_COLS, EXTRA_COLS, parseCSV, parseAppCSV, parseAppRows, rangeLabel, parseFile, parseHyundaiStatement, parseHyundaiRealtime, htmlRows,
+    combine, classify, spendAmount, netAmount, applyOffsets, monthFlow, installment, analyze, findRecurring, findDuplicates,
     dayNum, weekday, addMonths, group, sum, median, toAppCSV,
     META_HEADER, stateToMeta, metaToState, metaDiff, remapOverrides,
   };
