@@ -76,7 +76,6 @@ fun SettingsScreen(go: (Screen) -> Unit) {
     }
 
     val listenerOn = remember(refresh) { NotificationManagerCompat.getEnabledListenerPackages(ctx).contains(ctx.packageName) }
-    val smsOn = remember(refresh) { Ingest.hasSmsPermission(ctx) }
     val notiOn = remember(refresh) {
         Build.VERSION.SDK_INT < 33 || ctx.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == android.content.pm.PackageManager.PERMISSION_GRANTED
     }
@@ -118,15 +117,14 @@ fun SettingsScreen(go: (Screen) -> Unit) {
 
         SectionTitle("자동 기록 권한")
         Panel {
-            PermissionRow("알림 읽기 (현대카드·네이버페이)", listenerOn) {
+            PermissionRow("알림 읽기 (카드·네이버페이·문자 앱)", listenerOn) {
                 LockGuard.skipNext = true
                 ctx.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
             }
-            Divider()
-            PermissionRow("문자 받기 (농협·카드 문자)", smsOn) {
-                LockGuard.skipNext = true
-                askPermission.launch(Manifest.permission.RECEIVE_SMS)
-            }
+            Text(
+                "농협·카드 문자는 문자 앱 알림으로 읽어요. 문자 앱 알림을 끄면 기록되지 않아요.",
+                fontSize = 12.sp, color = C.sub, lineHeight = 17.sp,
+            )
             if (Build.VERSION.SDK_INT >= 33) {
                 Divider()
                 PermissionRow("알림 보내기 (예산·분류 알림)", notiOn) {
@@ -134,7 +132,7 @@ fun SettingsScreen(go: (Screen) -> Unit) {
                     askPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
                 }
             }
-            if (Build.VERSION.SDK_INT >= 33 && (!listenerOn || !smsOn)) {
+            if (Build.VERSION.SDK_INT >= 33 && !listenerOn) {
                 Text(
                     "켜기가 막혀 있으면: 휴대폰 설정 → 애플리케이션 → 가계부 → 오른쪽 위 ⋮ → '제한된 설정 허용'을 먼저 눌러주세요. 직접 설치한 앱이라 한 번 필요해요.",
                     fontSize = 12.sp, color = C.sub, lineHeight = 17.sp,

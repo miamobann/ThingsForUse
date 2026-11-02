@@ -32,9 +32,8 @@ import java.time.YearMonth
 /** 알림·문자·파일·직접 입력이 모두 지나가는 곳. 중복 확인 → 저장 → 분류 요청·예산 알림. */
 object Ingest {
 
-    private val SMS_APPS = setOf(
-        "com.samsung.android.messaging", "com.google.android.apps.messaging", "com.android.mms",
-    )
+    /** 문자 앱 (삼성 메시지, 구글 메시지, 기본 문자 앱 등) */
+    fun isSmsApp(pkg: String) = pkg.contains("messaging") || pkg.contains("mms") || pkg.endsWith(".message")
 
     private fun isCardApp(pkg: String) = pkg.contains("hyundaicard")
     private fun isNaverPayApp(pkg: String) = pkg.contains("naverfin") || pkg == "com.nhn.android.search"
@@ -43,9 +42,9 @@ object Ingest {
     fun fromNotification(ctx: Context, pkg: String, title: String?, text: String, postedAt: LocalDateTime) {
         val repo = Repository.get(ctx)
         when {
-            pkg in SMS_APPS -> {
-                // 문자 권한이 있으면 문자 수신기가 처리한다. 없을 때만 문자 앱 알림으로 대신 읽는다.
-                if (!hasSmsPermission(ctx)) fromSms(ctx, listOfNotNull(title, text).joinToString("\n"), postedAt)
+            isSmsApp(pkg) -> {
+                // 문자 권한 없이 문자 앱 알림으로 읽는다. 제목은 보낸 사람(예: 농협), 내용은 문자 본문.
+                fromSms(ctx, listOfNotNull(title, text).joinToString("\n"), postedAt)
             }
             isCardApp(pkg) -> {
                 val p = HyundaiCardMessageParser.parse(title, text, postedAt, Source.CARD_NOTI)
@@ -262,6 +261,4 @@ object Ingest {
         ctx.getSystemService(NotificationManager::class.java).notify(id, n)
     }
 
-    fun hasSmsPermission(ctx: Context) =
-        ctx.checkSelfPermission(Manifest.permission.RECEIVE_SMS) == PackageManager.PERMISSION_GRANTED
 }

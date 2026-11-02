@@ -113,7 +113,7 @@ fun HomeScreen(go: (Screen) -> Unit, openTx: (Long) -> Unit) {
             item {
                 Panel {
                     Text("아직 이번 달 기록이 없어요.", color = C.sub, fontSize = 14.sp)
-                    Text("설정에서 알림 읽기와 문자 권한을 켜 두면 결제할 때마다 자동으로 쌓여요.", color = C.sub, fontSize = 13.sp)
+                    Text("설정에서 알림 읽기를 켜 두면 결제할 때마다 자동으로 쌓여요.", color = C.sub, fontSize = 13.sp)
                 }
             }
         } else {

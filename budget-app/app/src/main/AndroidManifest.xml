@@ -2,8 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- 농협·카드 결제 문자 읽기 -->
-    <uses-permission android:name="android.permission.RECEIVE_SMS" />
+    <!-- 문자 권한은 쓰지 않는다. 농협·카드 문자는 문자 앱의 알림으로 읽는다 (Play 프로텍트 경고를 줄이려고). -->
     <!-- 예산 알림, 새 가게 분류 알림 -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
@@ -42,13 +41,5 @@
             </intent-filter>
         </service>
 
-        <receiver
-            android:name=".ingest.SmsReceiver"
-            android:exported="true"
-            android:permission="android.permission.BROADCAST_SMS">
-            <intent-filter>
-                <action android:name="android.provider.Telephony.SMS_RECEIVED" />
-            </intent-filter>
-        </receiver>
     </application>
 </manifest>
