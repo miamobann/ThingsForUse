@@ -24,6 +24,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import budget.app.data.Prefs
 import budget.core.BudgetStatus
+import budget.core.Recurring
+import budget.core.RecurringFinder
 import budget.core.Stats
 import budget.core.Tx
 import java.time.LocalDate
@@ -36,6 +38,7 @@ private data class HomeData(
     val uncategorized: Int,
     val openRefunds: Int,
     val unparsed: Int,
+    val recurring: List<Recurring>,
 )
 
 @Composable
@@ -48,6 +51,7 @@ fun HomeScreen(go: (Screen) -> Unit, openTx: (Long) -> Unit) {
         val from = ym.minusMonths(1).atDay(1).atStartOfDay()
         val to = ym.plusMonths(1).atDay(1).atStartOfDay()
         val txs = repo.between(from, to)
+        val recurring = RecurringFinder.find(repo.between(ym.minusMonths(6).atDay(1).atStartOfDay(), to), today, hidden = prefs.hiddenRecurring)
         val stats = Stats(txs, prefs.includeTransfers)
         HomeData(
             month = txs.filter { YearMonth.from(it.time) == ym },
@@ -56,6 +60,7 @@ fun HomeScreen(go: (Screen) -> Unit, openTx: (Long) -> Unit) {
             uncategorized = repo.uncategorized().size,
             openRefunds = repo.openRefunds().size,
             unparsed = repo.unparsed().size,
+            recurring = recurring,
         )
     } ?: return
 
@@ -70,6 +75,16 @@ fun HomeScreen(go: (Screen) -> Unit, openTx: (Long) -> Unit) {
             }
         }
         item { BudgetPanel(data.spent, data.prevSameDay, prefs.monthlyBudget, today) }
+        if (data.recurring.isNotEmpty()) {
+            item {
+                val left = data.recurring.filter { !it.paidThisMonth }
+                Notice(
+                    if (left.isEmpty()) "고정 지출 ${data.recurring.size}건 모두 나갔어요"
+                    else "남은 고정 지출 ${left.size}건 · ${won(RecurringFinder.remaining(data.recurring))}",
+                    "보기",
+                ) { go(Screen.Recurring) }
+            }
+        }
         if (data.uncategorized > 0) {
             item {
                 Notice("분류 안 된 결제 ${data.uncategorized}건이 있어요", "고르기") { go(Screen.Uncategorized) }

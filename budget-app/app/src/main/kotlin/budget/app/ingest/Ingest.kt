@@ -14,6 +14,9 @@ import budget.app.ui.MainActivity
 import budget.app.ui.won
 import budget.core.BudgetAlert
 import budget.core.HyundaiCardMessageParser
+import budget.core.AppCsv
+import budget.core.AppCsv.toNewTx
+import budget.core.Categories
 import budget.core.Matcher
 import budget.core.Merchants
 import budget.core.NaverPayParser
@@ -130,6 +133,43 @@ object Ingest {
                     }
                     is Matcher.Decision.Duplicate -> consumed += d.existing.id
                     else -> Unit
+                }
+            }
+        }
+        repo.changed()
+        return added
+    }
+
+    /**
+     * 분석 프로그램 등에서 정리한 가계부 CSV 넣기. 카테고리·메모·지출 포함 여부를 그대로 쓰고,
+     * 이미 기록된 결제는 건너뛴다. 가게별 분류는 아직 기억이 없으면 기억해 둔다.
+     */
+    fun importCsv(ctx: Context, rows: List<AppCsv.Row>): Int {
+        val repo = Repository.get(ctx)
+        if (rows.isEmpty()) return 0
+        val from = rows.minOf { it.parsed.time }.minusDays(3)
+        val to = rows.maxOf { it.parsed.time }.plusDays(3)
+        val consumed = mutableSetOf<Long>()
+        // 파일 안의 줄끼리는 이미 정리된 내역이라 서로 비교하지 않는다 (같은 금액이라도 시각이 다르면 다른 결제)
+        val inserted = mutableSetOf<Long>()
+        var added = 0
+        repo.transaction {
+            for (row in rows) {
+                val p = row.parsed.copy(cancelled = false)
+                val d = Matcher.decide(p, repo.between(from, to).filter { it.id !in inserted }, consumed)
+                if (d == Matcher.Decision.Insert) {
+                    val id = repo.insert(row.toNewTx())
+                    inserted += id
+                    added++
+                    val c = row.category
+                    if (c != null && row.includeInSpending && c != Categories.TRANSFER &&
+                        !Merchants.isPaymentAgentOnly(row.merchant) && repo.ruleFor(row.merchant) == null
+                    ) repo.putRule(Merchants.key(row.merchant), c)
+                } else {
+                    if (d is Matcher.Decision.Duplicate) {
+                        consumed += d.existing.id
+                        if (d.existing.category == null && row.category != null) repo.update(d.existing.copy(category = row.category))
+                    } else apply(repo, p, d)
                 }
             }
         }

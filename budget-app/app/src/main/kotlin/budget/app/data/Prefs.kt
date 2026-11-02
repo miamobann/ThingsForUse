@@ -25,6 +25,11 @@ class Prefs(ctx: Context) {
         get() = p.getString("categories", null)?.split("\n")?.filter { it.isNotBlank() } ?: Categories.DEFAULT
         set(v) = p.edit().putString("categories", v.joinToString("\n")).apply()
 
+    /** '고정 지출 아님'으로 뺀 가게 */
+    var hiddenRecurring: Set<String>
+        get() = p.getStringSet("hidden_recurring", emptySet())!!.toSet()
+        set(v) = p.edit().putStringSet("hidden_recurring", v).apply()
+
     fun alertsSent(ym: YearMonth): Set<Int> =
         p.getStringSet("alerts_$ym", emptySet())!!.mapNotNull { it.toIntOrNull() }.toSet()
 

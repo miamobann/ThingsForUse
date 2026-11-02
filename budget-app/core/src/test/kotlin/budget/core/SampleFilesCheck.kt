@@ -40,3 +40,26 @@ class SampleFilesCheck {
         s.monthly(java.time.YearMonth.of(2026, 11), 12).forEach { println("${it.first}: ${it.second}") }
     }
 }
+
+/** 분석 프로그램이 내보낸 가계부 CSV 확인: BUDGET_CSV=파일 경로 */
+class AppCsvSampleCheck {
+    @kotlin.test.Test
+    fun readAppCsvSample() {
+        val path = System.getenv("BUDGET_CSV") ?: return
+        val r = AppCsv.parse(java.io.File(path).readText())
+        val txs = r.rows.mapIndexed { i, row -> with(AppCsv) { row.toNewTx() }.copy(id = i + 1L) }
+        val total = txs.sumOf { Stats(txs, true).effective(it) }
+        println("rows=${r.rows.size} skipped=${r.skipped} total=$total kinds=${txs.groupingBy { it.kind }.eachCount()} sources=${txs.groupingBy { it.source }.eachCount()}")
+        // 앱에 넣을 때처럼 하나씩 Matcher에 돌려본다
+        val list = mutableListOf<Tx>()
+        val counts = mutableMapOf<String, Int>()
+        r.rows.forEachIndexed { i, row ->
+            val d = Matcher.decide(row.parsed.copy(cancelled = false), list)
+            counts.merge(d::class.simpleName ?: "?", 1, Int::plus)
+            if (d == Matcher.Decision.Insert) list += with(AppCsv) { row.toNewTx() }.copy(id = i + 1L)
+        }
+        println("decisions(서로 비교)=$counts")
+        val preview = ImportPreview.simulate(r.rows.map { it.parsed.copy(cancelled = false) }, emptyList(), independentRows = true)
+        println("빈 앱에 넣으면 추가 ${preview.added.size}건")
+    }
+}

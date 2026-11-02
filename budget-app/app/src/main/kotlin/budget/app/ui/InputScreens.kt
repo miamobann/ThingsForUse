@@ -34,10 +34,11 @@ import androidx.compose.ui.unit.sp
 import budget.app.data.Prefs
 import budget.app.data.Repository
 import budget.app.ingest.Ingest
+import budget.core.AppCsv
 import budget.core.HyundaiCardFileParser
+import budget.core.Parsed
 import budget.core.ImportPreview
 import budget.core.Kind
-import budget.core.Parsed
 import budget.core.Source
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -118,7 +119,7 @@ fun ImportScreen(onDone: () -> Unit) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var fileName by remember { mutableStateOf<String?>(null) }
-    var result by remember { mutableStateOf<HyundaiCardFileParser.Result?>(null) }
+    var result by remember { mutableStateOf<Loaded?>(null) }
     var preview by remember { mutableStateOf<ImportPreview.Summary?>(null) }
     var errorMsg by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
@@ -135,12 +136,22 @@ fun ImportScreen(onDone: () -> Unit) {
                     val bytes = ctx.contentResolver.openInputStream(uri)!!.use { it.readBytes() }
                     var text = String(bytes, Charsets.UTF_8)
                     if (text.contains('�')) text = String(bytes, Charset.forName("EUC-KR"))
-                    val parsed = HyundaiCardFileParser.parse(text) ?: error("현대카드 이용내역 파일 형식이 아니에요")
-                    val existing = Repository.get(ctx).let { repo ->
-                        if (parsed.rows.isEmpty()) emptyList()
-                        else repo.between(parsed.rows.minOf { it.time }.minusDays(3), parsed.rows.maxOf { it.time }.plusDays(3))
+                    val card = HyundaiCardFileParser.parse(text)
+                    val loaded = if (card != null) {
+                        Loaded("${card.type.label}로 읽었어요", card.rows, null)
+                    } else {
+                        val csv = runCatching { AppCsv.parse(text) }.getOrNull()?.takeIf { it.rows.isNotEmpty() }
+                            ?: error("현대카드 이용내역이나 가계부 CSV 파일이 아니에요")
+                        Loaded(
+                            "가계부 CSV로 읽었어요" + if (csv.skipped > 0) " (읽지 못한 줄 ${csv.skipped}개)" else "",
+                            csv.rows.map { it.parsed.copy(cancelled = false) }, csv.rows,
+                        )
                     }
-                    parsed to ImportPreview.simulate(parsed.rows, existing)
+                    val existing = Repository.get(ctx).let { repo ->
+                        if (loaded.rows.isEmpty()) emptyList()
+                        else repo.between(loaded.rows.minOf { it.time }.minusDays(3), loaded.rows.maxOf { it.time }.plusDays(3))
+                    }
+                    loaded to ImportPreview.simulate(loaded.rows, existing, independentRows = loaded.csv != null)
                 }
             }
             busy = false
@@ -155,6 +166,7 @@ fun ImportScreen(onDone: () -> Unit) {
         Panel {
             Text("현대카드 홈페이지 → 이용내역에서 받은 파일(.xls)을 골라주세요.", fontSize = 14.sp, lineHeight = 20.sp)
             Text("월 이용대금명세서, 실시간 이용내역 둘 다 돼요. 알림·문자로 이미 들어온 결제는 건너뛰어요.", fontSize = 13.sp, color = C.sub, lineHeight = 18.sp)
+            Text("분석 프로그램에서 내보낸 가계부 CSV도 넣을 수 있어요. 분류·메모를 그대로 가져와요.", fontSize = 13.sp, color = C.sub, lineHeight = 18.sp)
             Spacer(Modifier.height(4.dp))
             Button(onClick = { LockGuard.skipNext = true; pick.launch(arrayOf("*/*")) }, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
                 Text(if (busy) "읽는 중…" else "파일 고르기")
@@ -168,7 +180,7 @@ fun ImportScreen(onDone: () -> Unit) {
             Spacer(Modifier.height(12.dp))
             Panel {
                 Text(fileName ?: "선택한 파일", fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                Text("${r.type.label}로 읽었어요 · ${r.rows.size}건", fontSize = 13.sp, color = C.accentDark)
+                Text("${r.label} · ${r.rows.size}건", fontSize = 13.sp, color = C.accentDark)
                 Row(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
                     Stat("새로 추가", p.added.size, Modifier.weight(1f))
                     Stat("이미 기록됨", p.duplicates + p.attached, Modifier.weight(1f))
@@ -191,7 +203,9 @@ fun ImportScreen(onDone: () -> Unit) {
                     onClick = {
                         busy = true
                         scope.launch {
-                            val n = withContext(Dispatchers.IO) { Ingest.importRows(ctx, r.rows) }
+                            val n = withContext(Dispatchers.IO) {
+                                r.csv?.let { Ingest.importCsv(ctx, it) } ?: Ingest.importRows(ctx, r.rows)
+                            }
                             busy = false
                             done = n
                         }
@@ -213,6 +227,9 @@ fun ImportScreen(onDone: () -> Unit) {
         Spacer(Modifier.height(24.dp))
     }
 }
+
+/** 읽은 파일. csv가 있으면 가계부 CSV (분류·메모까지 넣는다) */
+private class Loaded(val label: String, val rows: List<Parsed>, val csv: List<AppCsv.Row>?)
 
 @Composable
 private fun Stat(label: String, n: Int, modifier: Modifier) {

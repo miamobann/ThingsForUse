@@ -52,6 +52,7 @@ sealed interface Screen {
     data object Uncategorized : Screen
     data object Unparsed : Screen
     data object Refunds : Screen
+    data object Recurring : Screen
 }
 
 class MainActivity : FragmentActivity() {
@@ -154,6 +155,7 @@ class MainActivity : FragmentActivity() {
                     Screen.Uncategorized -> UncategorizedScreen(onBack = { screen = Screen.Home }) { openTx = it }
                     Screen.Unparsed -> UnparsedScreen(onBack = { screen = Screen.Settings })
                     Screen.Refunds -> RefundsScreen(onBack = { screen = Screen.Home }) { openTx = it }
+                    Screen.Recurring -> RecurringScreen(onBack = { screen = Screen.Home })
                 }
             }
             if (screen in listOf(Screen.Home, Screen.Calendar, Screen.Stats, Screen.Settings)) {

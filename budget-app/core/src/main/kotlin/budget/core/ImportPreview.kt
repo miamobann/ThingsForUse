@@ -11,7 +11,8 @@ object ImportPreview {
         val ignored: Int,
     )
 
-    fun simulate(rows: List<Parsed>, existing: List<Tx>): Summary {
+    /** @param independentRows 파일 안의 줄끼리는 비교하지 않는다 (이미 정리된 가계부 CSV) */
+    fun simulate(rows: List<Parsed>, existing: List<Tx>, independentRows: Boolean = false): Summary {
         val list = existing.toMutableList()
         val consumed = mutableSetOf<Long>()
         var nextId = (existing.maxOfOrNull { it.id } ?: 0L) + 1_000_000L
@@ -24,7 +25,7 @@ object ImportPreview {
             when (val d = Matcher.decide(p, list, consumed)) {
                 Matcher.Decision.Insert -> {
                     val t = p.toTx(nextId++, null)
-                    list += t
+                    if (!independentRows) list += t
                     consumed += t.id
                     added += p
                 }
