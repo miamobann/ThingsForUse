@@ -1239,18 +1239,20 @@ details summary { cursor: pointer; font-weight: 600; margin: 4px 0; }
       const ai = UI.ai && UI.ai[g.key];
       const sug = ai || (g.cat ? { cat: g.cat, sub: (suggestFor(g.store) || {}).cat === g.cat ? suggestFor(g.store).sub : '' } : suggestFor(g.store)) || { cat: '', sub: '' };
       const cat = g.cat || sug.cat;
-      return `<tr data-key="${esc(g.key)}"><td>${esc(g.store)}${ai ? ' <span class="pill">AI 제안</span>' : (!g.cat && sug.cat ? ' <span class="pill">추천</span>' : '')}<div class="muted" style="font-size:12px">${esc(g.list[0].r.memo).slice(0, 60)}</div></td>
+      return `<tr data-key="${esc(g.key)}"><td>${esc(g.store)}${ai ? ' <span class="pill">AI 제안</span>' : ((!g.cat && sug.cat) || (sug.sub && sug.cat === cat) ? ' <span class="pill">추천</span>' : '')}<div class="muted" style="font-size:12px">${esc(g.list[0].r.memo).slice(0, 60)}</div></td>
         <td class="num">${g.n}건</td><td class="num">${won(g.v)}</td>
         <td><select class="ccat" ${fixedCat ? 'disabled title="가계부 앱에서 정한 대분류예요"' : ''}>${catOptions(cat)}</select></td>
         <td><select class="csub">${subOptions(cat, sug.cat === cat ? sug.sub : '')}</select></td>
         <td><button class="btn small primary csave">저장</button></td></tr>`;
     }).join('');
     const agentHtml = agentRows.slice(0, UI.agentLimit || 60).map((x) => {
-      const sug = (x.c.cat ? null : suggestFor(x.r.store, x.r.memo)) || { cat: x.c.cat, sub: x.c.sub };
+      const s0 = suggestFor(x.r.store, x.r.memo);
+      const sug = (s0 && (!x.c.cat || s0.cat === x.c.cat) ? s0 : null) || { cat: x.c.cat, sub: x.c.sub };
       const cat = x.c.cat || sug.cat;
+      const sugShown = s0 && sug === s0 && (!x.c.cat || (s0.sub && !x.c.sub));
       const prod = C.productName(x.r.memo);
       const kw = C.sellerFromMemo(x.r.memo) || prod.replace(/[\[\](){}*].*$/, '').split(/\s+/).slice(0, 2).join(' ').trim() || x.r.store.replace(/\s*(유한회사?|주식회사|\(주\)|㈜)\s*/g, '').trim();
-      return `<tr data-id="${esc(x.r.id)}"><td>${x.r.date}</td><td>${esc(x.r.store)}${!x.c.cat && sug.cat ? ' <span class="pill">추천</span>' : ''}<div class="muted" style="font-size:12px">${esc(prod).slice(0, 70)}</div></td><td class="num">${won(x.r.amount)}</td>
+      return `<tr data-id="${esc(x.r.id)}"><td>${x.r.date}</td><td>${esc(x.r.store)}${sugShown ? ' <span class="pill">추천</span>' : ''}<div class="muted" style="font-size:12px">${esc(prod).slice(0, 70)}</div></td><td class="num">${won(x.r.amount)}</td>
       <td><select class="ccat" ${x.r.cat ? 'disabled' : ''}>${catOptions(cat)}</select></td><td><select class="csub">${subOptions(cat, sug.cat === cat ? sug.sub : x.c.sub)}</select></td>
       <td style="white-space:nowrap"><button class="btn small primary csave1">이 건만</button>
         <input type="text" class="ckw" value="${esc(kw)}" size="9" title="이 단어가 가게 이름이나 상품명에 들어간 결제를 모두 같은 분류로"><button class="btn small crule">들어간 것 모두</button></td></tr>`;
@@ -1259,7 +1261,7 @@ details summary { cursor: pointer; font-weight: 600; margin: 4px 0; }
     return `
       <div class="card"><h2>가게별 분류 ${groups.length ? `· 남은 가게 ${groups.length}곳` : ''}</h2>
         <p class="sub">한 번 저장하면 같은 가게는 앞으로 자동으로 분류돼요. 금액이 큰 가게부터 보여요. "추천"은 가게 이름으로 미리 골라둔 값이라 저장해야 반영돼요.</p>
-        <div class="filters"><button class="btn" id="saveAllSug">추천·AI 제안 있는 것 모두 저장</button>
+        <div class="filters"><button class="btn" id="saveAllSug" title="세부까지 채워진 줄을 한 번에 저장해요 (추천·AI 제안·직접 고른 것 모두)">채워진 것 모두 저장</button>
           <button class="btn primary" id="aiBtn" ${hasKey ? '' : 'disabled title="설정에서 API 키를 넣어야 해요"'}>AI 자동 분류 (가게 이름만 보내요)</button>
           ${hasKey ? '' : '<span class="muted">AI를 쓰려면 설정 탭에서 Anthropic API 키를 넣어주세요.</span>'}<span id="aiStatus" class="muted"></span></div>
         ${groups.length ? `<div class="tablewrap"><table><thead><tr><th>가게</th><th class="num">건수</th><th class="num">합계</th><th>대분류</th><th>세부</th><th></th></tr></thead><tbody>${rowsHtml}</tbody></table></div>${groups.length > (UI.classLimit || 80) ? '<p style="text-align:center"><button class="btn" id="moreClass">더 보기</button></p>' : ''}` : '<p>분류할 가게가 없어요. 👍</p>'}
@@ -1308,15 +1310,15 @@ details summary { cursor: pointer; font-weight: 600; margin: 4px 0; }
     const sa = $('#saveAllSug', root);
     if (sa) sa.onclick = () => {
       let n = 0;
+      // 세부까지 골라졌거나, 대분류를 새로 고른 줄 (앱이 정한 대분류만 있고 세부가 빈 줄은 그대로 둔다)
+      const filled = (tr) => { const c = $('.ccat', tr); return c.value && ($('.csub', tr).value || !c.disabled); };
       root.querySelectorAll('tr[data-key]').forEach((tr) => {
-        if (!tr.querySelector('.pill')) return;
-        const cat = $('.ccat', tr).value, sub = $('.csub', tr).value;
-        if (cat) { S.memory[tr.dataset.key] = { cat, sub }; n++; }
+        if (!filled(tr)) return;
+        S.memory[tr.dataset.key] = { cat: $('.ccat', tr).value, sub: $('.csub', tr).value }; n++;
       });
       root.querySelectorAll('tr[data-id]').forEach((tr) => {
-        if (!tr.querySelector('.pill')) return;
-        const cat = $('.ccat', tr).value, sub = $('.csub', tr).value;
-        if (cat) { S.overrides[tr.dataset.id] = { ...(S.overrides[tr.dataset.id] || {}), cat, sub }; n++; }
+        if (!filled(tr)) return;
+        S.overrides[tr.dataset.id] = { ...(S.overrides[tr.dataset.id] || {}), cat: $('.ccat', tr).value, sub: $('.csub', tr).value }; n++;
       });
       UI.ai = null; save(); recompute(); render(); toast(`${n}건 저장했어요`);
     };
