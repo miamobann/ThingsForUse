@@ -124,6 +124,7 @@ object SheetSync {
         val code = conn.responseCode
         val text = (if (code in 200..299) conn.inputStream else conn.errorStream)?.use { it.readBytes().toString(Charsets.UTF_8) } ?: ""
         conn.disconnect()
+        if (code == 401 || code == 403) error("시트가 로그인을 요구해요(HTTP $code). 배포 액세스를 '모든 사용자'로 바꾸고, 주소가 /exec로 끝나는지 확인해 주세요")
         if (code !in 200..299) error("HTTP $code")
         if (!text.trimStart().startsWith("{")) error("시트 응답이 이상해요. 웹 앱을 '모든 사용자'로 배포했는지 확인해 주세요")
         return text
