@@ -10,6 +10,7 @@
  *  4. '메일' 시트에 한 줄씩 쌓고 '내역'에서 금액이 같은 앱 기록을 찾아 id를 적는다 (mailMatch_ 참고).
  *  5. 처음 짝지어지는 순간 한 번만, 그 기록의 분류를 메일 분류로 '분류 자료' 건별 줄에 쓴다 → 앱이 다음 동기화 때 받아 감.
  *     그 뒤에 앱·분석기에서 직접 고친 분류는 다시 덮지 않는다. 분류가 비었거나 추정인 메일은 쓰지 않는다.
+ *  6. 단, 짝지어진 기록의 대분류가 '보류'면 실행할 때마다 메일 분류로 바꾼다(추정 분류도 씀). 나중에 보류로 바꾼 건도 포함.
  * 읽은 메일은 숨김 시트 '메일 기록'에 남겨 다시 읽지 않는다.
  *
  * 처음 한 번: 편집기에서 mailSetup 실행 (Gmail 권한 허용). 멈추려면 mailStop.
@@ -340,8 +341,10 @@ function mailMatch_(ss, sh) {
   var mail = sh.getRange(2, 1, last - 1, n).getValues();
   var txSh = ss.getSheetByName(SYNC_TX_SHEET);
   if (!txSh || txSh.getLastRow() < 2) return;
-  var tx = txSh.getRange(2, 1, txSh.getLastRow() - 1, 4).getValues().map(function (r) {
+  var txCat = {};
+  var tx = txSh.getRange(2, 1, txSh.getLastRow() - 1, 7).getValues().map(function (r) {
     var date = mailStr_(r[1]), time = mailStr_(r[2]);
+    txCat[String(r[0])] = String(r[6]);
     return { id: String(r[0]), at: mailMinutes_(date, time), day: mailMinutes_(date, '00:00'), amount: Number(r[3]) };
   }).filter(function (t) { return t.id && t.day != null; });
   var used = {};
@@ -367,11 +370,34 @@ function mailMatch_(ss, sh) {
     });
     if (best) {
       used[best.id] = true;
+      r[14] = best.id;
       sh.getRange(i + 2, 15).setNumberFormat('@').setValue(best.id);
       if (r[11] && !/추정|분류 없음/.test(String(r[13]))) assign.push({ id: best.id, cat: String(r[11]), sub: String(r[12] || '') });
     }
   });
+
+  // 대분류가 '보류'인 짝지어진 기록은 메일 분류로 (분류 자료 건별 대분류가 있으면 그걸, 없으면 앱 카테고리를 본다)
+  var metaCat = mailMetaCategories_(ss);
+  var queued = {};
+  assign.forEach(function (a) { queued[a.id] = true; });
+  mail.forEach(function (r) {
+    var id = String(r[14] || '');
+    if (!id || queued[id] || r[4] !== '결제' || !r[11]) return;
+    var cur = metaCat[id] ? metaCat[id] : txCat[id];
+    if (cur === '보류') { assign.push({ id: id, cat: String(r[11]), sub: String(r[12] || '') }); queued[id] = true; }
+  });
   if (assign.length) mailApplyCategories_(ss, assign);
+}
+
+/** '분류 자료' 건별 줄의 대분류 { 앱 id: 대분류 } (빈 칸은 뺌) */
+function mailMetaCategories_(ss) {
+  var sh = ss.getSheetByName(SYNC_META_SHEET);
+  var out = {};
+  if (!sh || sh.getLastRow() < 2) return out;
+  sh.getRange(2, 1, sh.getLastRow() - 1, 3).getValues().forEach(function (r) {
+    if (String(r[0]) === '건별' && String(r[2]) !== '') out[String(r[1])] = String(r[2]);
+  });
+  return out;
 }
 
 /**
