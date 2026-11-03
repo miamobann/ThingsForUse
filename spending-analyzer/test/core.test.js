@@ -184,3 +184,16 @@ test('단어 규칙이 가게 기억보다 먼저, 대소문자 무시', () => {
   assert.deepEqual([C.classify(r('STEAM', ''), s2).cat, C.classify(r('STEAM', ''), s2).sub], ['여가', '게임']); // 규칙에 세부가 없으면 기억의 세부
   assert.equal(C.classify(r('CHZZK', '정기구독', {}), { ...st, overrides: { x: { cat: '여가' } } }).cat, '여가'); // 건별이 제일 먼저
 });
+
+test('보류: 분류 안 된 것처럼, 규칙·가게 기억으로 채우지 않음, 건별로 풀면 분류', () => {
+  const C = require('../src/core.js');
+  const state = { memory: { [C.storeKey('카페가게')]: { cat: '카페·간식', sub: '카페' } }, overrides: {}, rules: [{ kw: '카페', cat: '식비', sub: '' }] };
+  const r = { id: 'h1', store: '카페가게', cat: '보류', memo: '' };
+  const c = C.classify(r, state);
+  assert.equal(c.held, true); assert.equal(c.cat, ''); assert.equal(c.decided, false);
+  state.overrides.h1 = { cat: '여가', sub: '굿즈' };
+  const c2 = C.classify(r, state);
+  assert.equal(c2.held, undefined); assert.equal(c2.cat, '여가'); assert.equal(c2.sub, '굿즈');
+  const c3 = C.classify({ id: 'h2', store: '카페가게', cat: '', memo: '' }, { ...state, overrides: { h2: { cat: '보류' } } });
+  assert.equal(c3.held, true);
+});

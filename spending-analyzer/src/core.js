@@ -413,8 +413,13 @@
    * state: {memory: {storeKey: {cat, sub}}, overrides: {id: {cat, sub}}}
    * 결제대행사 이름만 있는 가게는 기억하지 않고 건별(overrides)로만.
    */
+  // 가계부 앱의 '보류': 나중에 분류하려고 미뤄 둔 건. 분류 안 된 것처럼 다루고, 규칙·가게 기억으로 저절로 채우지 않는다.
+  const HOLD = '보류';
   function classify(r, state) {
-    const ov = state.overrides[r.id];
+    const ov0 = state.overrides[r.id];
+    const held = ov0 && ov0.cat ? ov0.cat === HOLD : r.cat === HOLD;
+    if (held) return { cat: '', sub: '', agent: isAgentOnly(r.store), key: storeKey(r.store), decided: false, byRule: false, held: true };
+    const ov = ov0;
     const agent = isAgentOnly(r.store);
     const k = storeKey(r.store);
     let mem = agent ? null : state.memory[k];
@@ -664,7 +669,7 @@
     DEFAULT_TREE, NOT_SPENDING_CATS, WEEKDAYS,
     displayName, storeKey, isAgentOnly, similarStore, productName, sellerFromMemo, matchRule,
     CSV_COLS, EXTRA_COLS, parseCSV, parseAppCSV, parseAppRows, rangeLabel, parseFile, parseHyundaiStatement, parseHyundaiRealtime, htmlRows,
-    combine, classify, spendAmount, netAmount, applyOffsets, monthFlow, installment, analyze, findRecurring, findDuplicates,
+    HOLD, combine, classify, spendAmount, netAmount, applyOffsets, monthFlow, installment, analyze, findRecurring, findDuplicates,
     dayNum, weekday, addMonths, group, sum, median, toAppCSV,
     META_HEADER, stateToMeta, metaToState, metaDiff, remapOverrides,
   };

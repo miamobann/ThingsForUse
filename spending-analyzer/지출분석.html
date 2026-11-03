@@ -526,8 +526,13 @@ a.estore:hover { color: var(--accent); border-bottom-color: var(--accent); }
    * state: {memory: {storeKey: {cat, sub}}, overrides: {id: {cat, sub}}}
    * 결제대행사 이름만 있는 가게는 기억하지 않고 건별(overrides)로만.
    */
+  // 가계부 앱의 '보류': 나중에 분류하려고 미뤄 둔 건. 분류 안 된 것처럼 다루고, 규칙·가게 기억으로 저절로 채우지 않는다.
+  const HOLD = '보류';
   function classify(r, state) {
-    const ov = state.overrides[r.id];
+    const ov0 = state.overrides[r.id];
+    const held = ov0 && ov0.cat ? ov0.cat === HOLD : r.cat === HOLD;
+    if (held) return { cat: '', sub: '', agent: isAgentOnly(r.store), key: storeKey(r.store), decided: false, byRule: false, held: true };
+    const ov = ov0;
     const agent = isAgentOnly(r.store);
     const k = storeKey(r.store);
     let mem = agent ? null : state.memory[k];
@@ -777,7 +782,7 @@ a.estore:hover { color: var(--accent); border-bottom-color: var(--accent); }
     DEFAULT_TREE, NOT_SPENDING_CATS, WEEKDAYS,
     displayName, storeKey, isAgentOnly, similarStore, productName, sellerFromMemo, matchRule,
     CSV_COLS, EXTRA_COLS, parseCSV, parseAppCSV, parseAppRows, rangeLabel, parseFile, parseHyundaiStatement, parseHyundaiRealtime, htmlRows,
-    combine, classify, spendAmount, netAmount, applyOffsets, monthFlow, installment, analyze, findRecurring, findDuplicates,
+    HOLD, combine, classify, spendAmount, netAmount, applyOffsets, monthFlow, installment, analyze, findRecurring, findDuplicates,
     dayNum, weekday, addMonths, group, sum, median, toAppCSV,
     META_HEADER, stateToMeta, metaToState, metaDiff, remapOverrides,
   };
@@ -794,6 +799,7 @@ a.estore:hover { color: var(--accent); border-bottom-color: var(--accent); }
   const won = (n) => `${Math.round(n).toLocaleString('ko-KR')}원`;
   const man = (n) => (Math.abs(n) >= 10000 ? `${(n / 10000).toFixed(Math.abs(n) >= 1000000 ? 0 : 1).replace(/\.0$/, '')}만` : `${Math.round(n).toLocaleString()}`);
   const UNCAT = '미분류';
+  const HOLD = C.HOLD; // 가계부 앱에서 '보류'로 미뤄 둔 건
   const NOSUB = '(세부 없음)';
 
   // ---------- 저장 ----------
@@ -879,7 +885,7 @@ a.estore:hover { color: var(--accent); border-bottom-color: var(--accent); }
       let amt = C.spendAmount(rr, S.opts);
       if (ov.exclude) amt = 0;
       if (ov.include && !r.canceled && r.amount > 0 && !r.offsetTo) amt = C.netAmount(r);
-      return { r, c, amt, cat: c.cat || UNCAT, sub: c.sub || NOSUB, ym: r.date.slice(0, 7) };
+      return { r, c, amt, cat: c.held ? HOLD : c.cat || UNCAT, sub: c.sub || NOSUB, ym: r.date.slice(0, 7) };
     });
     const months = [...new Set(items.map((x) => x.ym))].sort();
     D = { ...combined, items, months };
@@ -891,7 +897,7 @@ a.estore:hover { color: var(--accent); border-bottom-color: var(--accent); }
   }
   // 대분류 색: 트리 순서대로 고정 (순위가 아니라 이름에 붙는다)
   function catColor(cat) {
-    if (cat === UNCAT) return 'var(--s-other)';
+    if (cat === UNCAT || cat === HOLD) return 'var(--s-other)';
     const i = cats().indexOf(cat);
     return i >= 0 && i < 8 ? `var(--s${i + 1})` : 'var(--s-other)';
   }
@@ -1101,8 +1107,9 @@ a.estore:hover { color: var(--accent); border-bottom-color: var(--accent); }
     const mCount = Math.max(1, months.filter((m) => m <= thisYM).length);
     const recurring = C.findRecurring(D.items.map((x) => ({ r: x.r, c: { ...x.c, cat: x.cat }, amt: x.amt })), todayStr);
     const activeFixed = recurring.filter((r) => r.active);
-    const uncat = spend.filter((x) => x.cat === UNCAT && x.amt > 0);
-    const nosub = spend.filter((x) => x.cat !== UNCAT && !x.c.decided && x.amt > 0);
+    const uncat = spend.filter((x) => (x.cat === UNCAT || x.cat === HOLD) && x.amt > 0);
+    const held = uncat.filter((x) => x.cat === HOLD);
+    const nosub = spend.filter((x) => x.cat !== UNCAT && x.cat !== HOLD && !x.c.decided && x.amt > 0);
 
     // 세부 분류
     const byCat = [...C.group(spend, (x) => x.cat)].map(([cat, l]) => ({ cat, l, v: C.sum(l.map((x) => x.amt)) })).sort((a, b) => b.v - a.v);
@@ -1186,7 +1193,7 @@ a.estore:hover { color: var(--accent); border-bottom-color: var(--accent); }
         <div class="tile"><div class="k">총지출</div><div class="v">${won(total)}</div><div class="d">${spend.length}건</div></div>
         <div class="tile"><div class="k">월평균</div><div class="v">${won(total / mCount)}</div><div class="d">${mCount}개월 기준</div></div>
         <div class="tile"><div class="k">고정 지출 (매달)</div><div class="v">${won(C.sum(activeFixed.map((f) => f.amount)))}</div><div class="d">진행 중 ${activeFixed.length}곳</div></div>
-        <div class="tile"><div class="k">분류 안 된 지출</div><div class="v ${uncat.length ? 'warn' : ''}">${won(C.sum(uncat.map((x) => x.amt)))}</div><div class="d">${uncat.length}건 · 세부 없음 ${nosub.length}건</div></div>
+        <div class="tile"><div class="k">분류 안 된 지출</div><div class="v ${uncat.length ? 'warn' : ''}">${won(C.sum(uncat.map((x) => x.amt)))}</div><div class="d">${uncat.length}건${held.length ? ` (보류 ${held.length}건)` : ''} · 세부 없음 ${nosub.length}건</div></div>
       </div>
       ${drill}
       <div class="card"><h2>세부 분류별 지출</h2><p class="sub">대분류를 누르면 세부 분류가 펼쳐지고, 세부 분류를 누르면 내역이 나와요.</p>${catHtml || '<p class="muted">이 기간에 지출이 없어요.</p>'}</div>
@@ -1240,7 +1247,7 @@ a.estore:hover { color: var(--accent); border-bottom-color: var(--accent); }
     if (t.sub) list = list.filter((x) => x.sub === t.sub);
     if (t.pay) list = list.filter((x) => x.r.pay === t.pay);
     if (t.src) list = list.filter((x) => x.r.source === t.src);
-    if (t.uncat) list = list.filter((x) => x.cat === UNCAT || !x.c.decided);
+    if (t.uncat) list = list.filter((x) => x.cat === UNCAT || x.cat === HOLD || !x.c.decided);
     if (!t.showOff) list = list.filter((x) => x.amt > 0);
     if (t.q) { const q = t.q.toLowerCase(); list = list.filter((x) => `${x.r.store} ${x.r.rawStore} ${x.r.memo}`.toLowerCase().includes(q)); }
     const key = { date: (x) => x.r.date + (x.r.time || ''), amount: (x) => x.r.amount, store: (x) => x.r.store, cat: (x) => `${x.cat}${x.sub}` }[t.sort];
@@ -1264,7 +1271,7 @@ a.estore:hover { color: var(--accent); border-bottom-color: var(--accent); }
     return `
       <div class="filters">${periodControl()}</div>
       <div class="filters">
-        <select id="fcat"><option value="">대분류 전체</option>${cats().concat(UNCAT).map((c) => `<option ${c === t.cat ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
+        <select id="fcat"><option value="">대분류 전체</option>${cats().concat(UNCAT, HOLD).map((c) => `<option ${c === t.cat ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
         <select id="fsub"><option value="">세부 전체</option>${(S.tree[t.cat] || []).concat(NOSUB).map((s) => `<option ${s === t.sub ? 'selected' : ''}>${esc(s)}</option>`).join('')}</select>
         <select id="fpay"><option value="">결제수단 전체</option>${pays.map((p) => `<option ${p === t.pay ? 'selected' : ''}>${esc(p)}</option>`).join('')}</select>
         <select id="fsrc"><option value="">출처 전체</option>${srcs.map((p) => `<option ${p === t.src ? 'selected' : ''}>${esc(p)}</option>`).join('')}</select>
@@ -1375,6 +1382,8 @@ a.estore:hover { color: var(--accent); border-bottom-color: var(--accent); }
     const agentRows = [];
     for (const x of D.items) {
       if (x.r.amount <= 0 || C.NOT_SPENDING_CATS.includes(x.r.cat) || x.r.canceled || !x.r.include) continue;
+      // 보류는 건별로 풀어야 앱에서도 풀려서, 가게로 묶지 않고 한 건씩 (결제대행사 건과 같은 표)
+      if (x.c.held) { agentRows.push(x); continue; }
       if (x.c.cat && x.c.decided) continue;
       if (x.c.agent) { agentRows.push(x); continue; }
       if (!groups.has(x.c.key)) groups.set(x.c.key, { key: x.c.key, store: x.r.store, list: [], cat: x.c.cat });
@@ -1387,7 +1396,7 @@ a.estore:hover { color: var(--accent); border-bottom-color: var(--accent); }
     const { groups, agentRows } = pending();
     UI.ai = UI.ai || null;
     const rowsHtml = groups.slice(0, UI.classLimit || 80).map((g) => {
-      const fixedCat = g.list.some((x) => x.r.cat); // 가계부 앱이 대분류를 정한 가게
+      const fixedCat = g.list.some((x) => x.r.cat && x.r.cat !== HOLD); // 가계부 앱이 대분류를 정한 가게
       const ai = UI.ai && UI.ai[g.key];
       const sug = ai || (g.cat ? { cat: g.cat, sub: (suggestFor(g.store) || {}).cat === g.cat ? suggestFor(g.store).sub : '' } : suggestFor(g.store)) || { cat: '', sub: '' };
       const cat = g.cat || sug.cat;
@@ -1398,14 +1407,16 @@ a.estore:hover { color: var(--accent); border-bottom-color: var(--accent); }
         <td><button class="btn small primary csave">저장</button></td></tr>`;
     }).join('');
     const agentHtml = agentRows.slice(0, UI.agentLimit || 60).map((x) => {
-      const s0 = suggestFor(x.r.store, x.r.memo);
+      const aiRow = UI.aiRow && UI.aiRow[x.r.id];
+      const mem = x.c.held && !x.c.agent ? S.memory[x.c.key] : null; // 보류 건엔 가게 기억을 추천으로만
+      const s0 = aiRow || (mem && mem.cat ? mem : null) || suggestFor(x.r.store, x.r.memo);
       const sug = (s0 && (!x.c.cat || s0.cat === x.c.cat) ? s0 : null) || { cat: x.c.cat, sub: x.c.sub };
       const cat = x.c.cat || sug.cat;
       const sugShown = s0 && sug === s0 && (!x.c.cat || (s0.sub && !x.c.sub));
       const prod = C.productName(x.r.memo);
       const kw = C.sellerFromMemo(x.r.memo) || prod.replace(/[\[\](){}*].*$/, '').split(/\s+/).slice(0, 2).join(' ').trim() || x.r.store.replace(/\s*(유한회사?|주식회사|\(주\)|㈜)\s*/g, '').trim();
-      return `<tr data-id="${esc(x.r.id)}"><td>${x.r.date}</td><td>${esc(x.r.store)}${sugShown ? ' <span class="pill">추천</span>' : ''}<div class="muted" style="font-size:12px">${esc(prod).slice(0, 70)}</div></td><td class="num">${won(x.r.amount)}</td>
-      <td><select class="ccat" ${x.r.cat ? 'disabled' : ''}>${catOptions(cat)}</select></td><td><select class="csub">${subOptions(cat, sug.cat === cat ? sug.sub : x.c.sub)}</select></td>
+      return `<tr data-id="${esc(x.r.id)}"><td>${x.r.date}</td><td>${esc(x.r.store)}${x.c.held ? ' <span class="pill">보류</span>' : ''}${sugShown ? ` <span class="pill">${aiRow ? 'AI 제안' : '추천'}</span>` : ''}<div class="muted" style="font-size:12px">${esc(prod).slice(0, 70)}</div></td><td class="num">${won(x.r.amount)}</td>
+      <td><select class="ccat" ${x.r.cat && x.r.cat !== HOLD ? 'disabled' : ''}>${catOptions(cat)}</select></td><td><select class="csub">${subOptions(cat, sug.cat === cat ? sug.sub : x.c.sub)}</select></td>
       <td style="white-space:nowrap"><button class="btn small primary csave1">이 건만</button>
         <input type="text" class="ckw" value="${esc(kw)}" size="9" title="이 단어가 가게 이름이나 상품명에 들어간 결제를 모두 같은 분류로"><button class="btn small crule">들어간 것 모두</button></td></tr>`;
     }).join('');
@@ -1414,12 +1425,12 @@ a.estore:hover { color: var(--accent); border-bottom-color: var(--accent); }
       <div class="card"><h2>가게별 분류 ${groups.length ? `· 남은 가게 ${groups.length}곳` : ''}</h2>
         <p class="sub">한 번 저장하면 같은 가게는 앞으로 자동으로 분류돼요. 금액이 큰 가게부터 보여요. "추천"은 가게 이름으로 미리 골라둔 값이라 저장해야 반영돼요.</p>
         <div class="filters"><button class="btn" id="saveAllSug" title="세부까지 채워진 줄을 한 번에 저장해요 (추천·AI 제안·직접 고른 것 모두)">채워진 것 모두 저장</button>
-          <button class="btn primary" id="aiBtn" ${hasKey ? '' : 'disabled title="설정에서 API 키를 넣어야 해요"'}>AI 자동 분류 (가게 이름만 보내요)</button>
+          <button class="btn primary" id="aiBtn" ${hasKey ? '' : 'disabled title="설정에서 API 키를 넣어야 해요"'}>AI 자동 분류 (가게 이름·상품명만 보내요)</button>
           ${hasKey ? '' : '<span class="muted">AI를 쓰려면 설정 탭에서 Anthropic API 키를 넣어주세요.</span>'}<span id="aiStatus" class="muted"></span></div>
         ${groups.length ? `<div class="tablewrap"><table><thead><tr><th>가게</th><th class="num">건수</th><th class="num">합계</th><th>대분류</th><th>세부</th><th></th></tr></thead><tbody>${rowsHtml}</tbody></table></div>${groups.length > (UI.classLimit || 80) ? '<p style="text-align:center"><button class="btn" id="moreClass">더 보기</button></p>' : ''}` : '<p>분류할 가게가 없어요. 👍</p>'}
       </div>
-      <div class="card"><h2>결제대행사 이름만 있는 결제 · ${agentRows.length}건</h2>
-        <p class="sub">"토스페이먼츠", "케이지이니시스"처럼 실제 가게를 알 수 없는 건은 가게로 기억하지 않아요. 상품명을 보고 <b>이 건만</b> 저장하거나, 옆 칸의 단어(예: 판매자 이름, 상품명 앞부분)가 <b>들어간 것 모두</b>를 한 번에 분류하세요. 단어 규칙은 앞으로 올리는 내역에도 적용돼요.</p>
+      <div class="card"><h2>한 건씩 분류 (보류 · 결제대행사) · ${agentRows.length}건</h2>
+        <p class="sub">가계부 앱에서 <b>보류</b>로 미뤄 둔 건과, "토스페이먼츠", "케이지이니시스"처럼 실제 가게를 알 수 없는 건이에요. 보류 건은 여기서 저장하면 앱에서도 보류가 풀려요. 결제대행사 건은 가게로 기억하지 않아요. 상품명을 보고 <b>이 건만</b> 저장하거나, 옆 칸의 단어(예: 판매자 이름, 상품명 앞부분)가 <b>들어간 것 모두</b>를 한 번에 분류하세요. 단어 규칙은 앞으로 올리는 내역에도 적용돼요.</p>
         ${agentRows.length ? `<div class="tablewrap"><table><thead><tr><th>날짜</th><th>가게 · 상품명</th><th class="num">금액</th><th>대분류</th><th>세부</th><th>저장</th></tr></thead><tbody>${agentHtml}</tbody></table></div>${agentRows.length > (UI.agentLimit || 60) ? '<p style="text-align:center"><button class="btn" id="moreAgent">더 보기</button></p>' : ''}` : '<p class="muted">없어요.</p>'}
       </div>
       <div class="card"><h2>세부 분류 목록</h2><p class="sub">대분류마다 세부 분류를 더하거나 뺄 수 있어요. 대분류 이름은 가계부 앱과 맞춰 두는 게 좋아요.</p>
@@ -1455,7 +1466,10 @@ a.estore:hover { color: var(--accent); border-bottom-color: var(--accent); }
         render(); toast(`'${kw}' 들어간 결제 ${n}건을 ${cat}${sub ? ' · ' + sub : ''}로 분류했어요`);
       };
       $('.csave1', tr).onclick = () => {
-        const id = tr.dataset.id; S.overrides[id] = { ...(S.overrides[id] || {}), cat: cs.value, sub: $('.csub', tr).value };
+        const id = tr.dataset.id;
+        if (!cs.value) return toast('대분류를 골라주세요');
+        S.overrides[id] = { ...(S.overrides[id] || {}), cat: cs.value, sub: $('.csub', tr).value };
+        if (UI.aiRow) delete UI.aiRow[id];
         save(); recompute(); render();
       };
     });
@@ -1472,7 +1486,7 @@ a.estore:hover { color: var(--accent); border-bottom-color: var(--accent); }
         if (!filled(tr)) return;
         S.overrides[tr.dataset.id] = { ...(S.overrides[tr.dataset.id] || {}), cat: $('.ccat', tr).value, sub: $('.csub', tr).value }; n++;
       });
-      UI.ai = null; save(); recompute(); render(); toast(`${n}건 저장했어요`);
+      UI.ai = null; UI.aiRow = null; save(); recompute(); render(); toast(`${n}건 저장했어요`);
     };
     const ma = $('#moreAgent', root); if (ma) ma.onclick = () => { UI.agentLimit = (UI.agentLimit || 60) + 200; render(); };
     root.querySelectorAll('.rdel').forEach((b) => b.onclick = () => { S.rules.splice(+b.dataset.i, 1); save(); recompute(); render(); });
@@ -1488,24 +1502,32 @@ a.estore:hover { color: var(--accent); border-bottom-color: var(--accent); }
   }
 
   async function runAI() {
-    const { groups } = pending();
-    const todo = groups.filter((g) => !(UI.ai && UI.ai[g.key])).slice(0, 150);
+    const { groups, agentRows } = pending();
+    // 가게별 줄 + 한 건씩 줄(보류·결제대행사). 한 건씩 줄은 상품명이 있거나 보류인 것만 (가게 이름만으론 알 수 없어서)
+    const todo = groups.filter((g) => !(UI.ai && UI.ai[g.key])).slice(0, 150).map((g) => ({ g }));
+    const rows = agentRows.filter((x) => !(UI.aiRow && UI.aiRow[x.r.id]) && (x.c.held || C.productName(x.r.memo))).slice(0, 100);
+    rows.forEach((x) => todo.push({ x }));
     if (!todo.length) return toast('AI에 물어볼 가게가 없어요');
-    const st = $('#aiStatus'); st.textContent = ` ${todo.length}곳 물어보는 중...`;
+    const st = $('#aiStatus'); st.textContent = ` ${todo.length}건 물어보는 중...`;
     const tree = Object.entries(S.tree).map(([c, s]) => `${c}: ${s.join(', ')}`).join('\n');
-    const list = todo.map((g, i) => `${i + 1}. ${g.store}${g.cat ? ` (대분류는 ${g.cat}로 정해짐)` : ''}`).join('\n');
-    const prompt = `한국 카드 결제 내역의 가게 이름을 보고 지출 분류를 골라줘.\n\n분류 목록 (대분류: 세부들):\n${tree}\n\n가게 이름:\n${list}\n\n규칙: 반드시 위 목록 안에서만 고르고, 대분류가 정해진 가게는 그 대분류 안에서 세부만 골라. 이름만으로 확신이 없으면 cat을 빈 문자열로 둬. 결제대행사 이름(토스페이먼츠, 이니시스 등)만 있으면 빈 문자열.\nJSON 배열로만 답해: [{"n":번호,"cat":"대분류","sub":"세부"}]`;
+    const list = todo.map((t, i) => {
+      if (t.g) return `${i + 1}. ${t.g.store}${t.g.cat ? ` (대분류는 ${t.g.cat}로 정해짐)` : ''}`;
+      const prod = C.productName(t.x.r.memo).slice(0, 80);
+      return `${i + 1}. ${t.x.r.store}${prod ? ` / 상품: ${prod}` : ''}`;
+    }).join('\n');
+    const prompt = `한국 카드 결제 내역의 가게 이름(있으면 상품명)을 보고 지출 분류를 골라줘.\n\n분류 목록 (대분류: 세부들):\n${tree}\n\n결제:\n${list}\n\n규칙: 반드시 위 목록 안에서만 고르고, 대분류가 정해진 가게는 그 대분류 안에서 세부만 골라. 확신이 없으면 cat을 빈 문자열로 둬. 결제대행사 이름(토스페이먼츠, 이니시스 등)만 있고 상품명이 없으면 빈 문자열.\nJSON 배열로만 답해: [{"n":번호,"cat":"대분류","sub":"세부"}]`;
     try {
       const text = await callAI(prompt);
       const arr = JSON.parse(text.slice(text.indexOf('['), text.lastIndexOf(']') + 1));
-      UI.ai = UI.ai || {};
+      UI.ai = UI.ai || {}; UI.aiRow = UI.aiRow || {};
       let n = 0;
       for (const a of arr) {
-        const g = todo[a.n - 1]; if (!g || !a.cat || !S.tree[a.cat]) continue;
-        if (g.cat && a.cat !== g.cat) continue;
-        UI.ai[g.key] = { cat: a.cat, sub: S.tree[a.cat].includes(a.sub) ? a.sub : '' }; n++;
+        const t = todo[a.n - 1]; if (!t || !a.cat || !S.tree[a.cat]) continue;
+        const v = { cat: a.cat, sub: S.tree[a.cat].includes(a.sub) ? a.sub : '' };
+        if (t.g) { if (t.g.cat && a.cat !== t.g.cat) continue; UI.ai[t.g.key] = v; } else UI.aiRow[t.x.r.id] = v;
+        n++;
       }
-      render(); toast(`AI가 ${n}곳을 제안했어요. 확인하고 저장하세요.`);
+      render(); toast(`AI가 ${n}건을 제안했어요. 확인하고 저장하세요.`);
     } catch (e) {
       st.textContent = ` 실패: ${e.message}`;
     }
@@ -1576,7 +1598,7 @@ a.estore:hover { color: var(--accent); border-bottom-color: var(--accent); }
         <button class="btn" id="bkOut">백업 파일 저장</button> <button class="btn" id="bkIn">백업 파일 불러오기</button></div>
       ${GAS ? `<div class="card"><h2>가계부 앱 연결 비밀번호 ${G.hasSync ? '<span class="pill">정해짐</span>' : '<span class="pill warn">아직 없음</span>'}</h2><p class="sub">가계부 앱이 이 시트에 내역을 보낼 때 쓰는 비밀번호예요. 8자 이상으로 정하고, 앱 설정에도 똑같이 넣어 주세요. 다시 정하면 앱 쪽도 바꿔야 해요.</p>
         <input type="password" id="synckey" size="30" placeholder="8자 이상"> <button class="btn" id="syncSave">${G.hasSync ? '바꾸기' : '정하기'}</button></div>` : ''}
-      <div class="card"><h2>AI 자동 분류 ${GAS && G.hasAi ? '<span class="pill">키 저장됨</span>' : ''}</h2><p class="sub">Anthropic API 키를 넣으면 '분류하기'에서 AI 자동 분류 버튼을 쓸 수 있어요. ${GAS ? '키는 이 시트의 앱스 스크립트 설정에 저장되고 화면에는 다시 보이지 않아요.' : '키는 이 PC의 브라우저에만 저장돼요.'} AI에는 분류 안 된 가게 이름과 분류 목록만 보내요 (금액·날짜는 안 보내요).</p>
+      <div class="card"><h2>AI 자동 분류 ${GAS && G.hasAi ? '<span class="pill">키 저장됨</span>' : ''}</h2><p class="sub">Anthropic API 키를 넣으면 '분류하기'에서 AI 자동 분류 버튼을 쓸 수 있어요. ${GAS ? '키는 이 시트의 앱스 스크립트 설정에 저장되고 화면에는 다시 보이지 않아요.' : '키는 이 PC의 브라우저에만 저장돼요.'} AI에는 분류 안 된 가게 이름, 한 건씩 분류할 결제의 상품명, 분류 목록만 보내요 (금액·날짜는 안 보내요).</p>
         <input type="password" id="apikey" size="44" placeholder="sk-ant-..." value="${GAS ? '' : esc(apiKey())}"> <button class="btn" id="keySave">저장</button> <button class="btn" id="keyDel">지우기</button></div>
       ${GAS ? '' : `<div class="card"><h2>모두 지우기</h2><p class="sub">이 브라우저에 저장된 내역·분류를 모두 지워요. 먼저 백업 파일을 저장해 두세요.</p><button class="btn" id="wipe">모두 지우기</button></div>`}`;
   }
