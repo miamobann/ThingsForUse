@@ -1,16 +1,17 @@
 /**
- * 구글 결제 영수증 메일 → 시트 '메일' (AI 없이 규칙으로 읽기).
+ * 결제 메일(Google Play 영수증, 윗치폼 결제완료) → 시트 '메일' (AI 없이 규칙으로 읽기).
  * Code.gs·Sync.gs 와 같은 앱스 스크립트 프로젝트에 넣는다. 시트 '내역'·'분류 자료'는 읽기만 한다.
  *
- * 카드 알림엔 "Google"만 찍히는 결제에 앱 이름·상품명을 붙이려는 보완용이다.
- *  1. 5분마다 최근 2일 Gmail 중 Google Play 영수증(보낸 곳·제목으로)만 찾는다. 새 메일이 없으면 바로 끝난다.
- *  2. 본문에서 주문 날짜·시각(한국 시각으로 바꿈), 합계, 상품명, 앱 이름, 결제 방법을 규칙으로 뽑는다.
- *  3. 분류는 '분류 자료'의 가게 기억 → 단어 규칙 순으로 찾고, 없으면 정기 결제는 '구독'으로 추정, 그 외는 비워 둔다.
- *  4. '메일' 시트에 한 줄씩 쌓고, '내역'에서 금액이 같고 시각 차이 MAIL_MATCH_MINUTES분 이내인 앱 기록 id를 적는다.
+ * 카드엔 "구글페이먼트코리아", "파이어볼트"만 찍히는 결제에 앱·폼 이름과 상품명을 붙이려는 보완용이다.
+ *  1. 5분마다 최근 2일 Gmail 중 Google Play 영수증, 윗치폼 결제완료·환불 메일만 찾는다. 새 메일이 없으면 바로 끝난다.
+ *  2. 본문에서 결제 날짜·시각(한국 시각), 금액, 상품명, 앱·폼 이름, 결제 방법을 규칙으로 뽑는다.
+ *     윗치폼 '주문 내역 안내' 메일은 결제완료 메일과 겹쳐서 건너뛴다.
+ *  3. 분류는 '분류 자료'의 가게 기억 → 단어 규칙 순으로 찾고, 없으면 구글 정기 결제는 '구독', 윗치폼은 '여가·굿즈'로 추정.
+ *  4. '메일' 시트에 한 줄씩 쌓고 '내역'에서 금액이 같은 앱 기록을 찾아 id를 적는다 (mailMatch_ 참고).
  * 읽은 메일은 숨김 시트 '메일 기록'에 남겨 다시 읽지 않는다.
  *
  * 처음 한 번: 편집기에서 mailSetup 실행 (Gmail 권한 허용). 멈추려면 mailStop.
- * 지난 메일 가져오기: mailBackfill90 (90일).
+ * 지난 메일 가져오기: mailBackfill365 (1년). 90일만이면 mailBackfill90.
  * 못 읽은 메일이 있으면 mailShowLast 를 실행해 로그의 본문을 보내 주면 규칙을 고칠 수 있다.
  */
 
@@ -19,7 +20,8 @@ var MAIL_LOG_SHEET = '메일 기록';
 var MAIL_HEADER = ['메일id', '받은 시각', '보낸 사람', '제목', '구분', '날짜', '시각', '금액', '판매처', '상품명',
   '결제수단', '대분류', '소분류', '확인 필요', '내역 id'];
 var MAIL_LOG_HEADER = ['메일id', '받은 시각', '판정', '보낸 사람', '제목'];
-var MAIL_QUERY = '(from:googleplay-noreply@google.com OR from:payments-noreply@google.com OR subject:"Google Play")';
+var MAIL_QUERY = '(from:googleplay-noreply@google.com OR from:payments-noreply@google.com OR subject:"Google Play" OR from:no-reply@witchform.com)';
+var MAIL_WITCH_DEFAULT = { cat: '여가', sub: '굿즈' };   // 윗치폼 분류가 없을 때
 var MAIL_MATCH_MINUTES = 15;   // '내역'과 짝지을 때 허용하는 시각 차이
 var MAIL_TZ = 'Asia/Seoul';
 
@@ -41,9 +43,11 @@ function mailStop() {
 /** 트리거가 부른다: 최근 2일 */
 function mailCheck() { mailRun_(2); }
 
-/** 지난 90일 메일 가져오기 (편집기에서 직접 실행) */
-function mailBackfill90() {
-  var n = mailRun_(90);
+/** 지난 메일 가져오기 (편집기에서 직접 실행) */
+function mailBackfill90() { mailBackfill_(90); }
+function mailBackfill365() { mailBackfill_(365); }
+function mailBackfill_(days) {
+  var n = mailRun_(days);
   Logger.log('새로 읽은 메일 ' + n + '통');
 }
 
@@ -54,7 +58,7 @@ function mailShowLast() {
   var msgs = t.getMessages();
   var info = mailInfo_(msgs[msgs.length - 1]);
   Logger.log('제목: ' + info.subject + '\n보낸 사람: ' + info.from + '\n\n' + info.body);
-  Logger.log(JSON.stringify(mailParseGoogle_(info)));
+  Logger.log(JSON.stringify(mailParse_(info)));
 }
 
 /** @return 새로 읽은 메일 수 */
@@ -83,7 +87,7 @@ function mailRun_(days) {
     var rows = [], logs = [];
     todo.forEach(function (m) {
       var info = mailInfo_(m);
-      var r = mailParseGoogle_(info);
+      var r = mailParse_(info);
       logs.push([info.id, info.received, r.kind, info.from, info.subject]);
       if (r.kind !== '결제' && r.kind !== '취소') return;
       var c = mailClassify_(r, hints);
@@ -148,6 +152,57 @@ function mailInfo_(m) {
   };
 }
 
+function mailParse_(info) {
+  return /witchform\.com/i.test(info.from) ? mailParseWitch_(info) : mailParseGoogle_(info);
+}
+
+/**
+ * 윗치폼 결제완료 메일 읽기. 줄 단위로 "결제일자 / 2026-08-10 01:35:53", "최종 결제금액 / 41,000원",
+ * "결제방법 / 간편결제", "주문상품 / 상품명 / 수량 / 1개 ..." 가 온다. 맨 위 '결제 완료되었습니다.' 다음 줄이 폼 이름.
+ */
+function mailParseWitch_(info) {
+  var s = info.subject, lines = info.body.split('\n');
+  var out = { kind: '결제', date: '', time: '', amount: '', merchant: '', items: '', method: '윗치폼', unsure: '', witch: true };
+  if (/환불|취소/.test(s)) out.kind = '취소';
+  else if (!/결제\s*완료/.test(s)) { out.kind = '아님'; return out; }   // 주문 내역 안내·입금 안내 등
+  var after = function (label) {
+    for (var i = 0; i < lines.length - 1; i++) if (lines[i] === label) return lines[i + 1];
+    return '';
+  };
+  for (var i = 0; i < lines.length; i++) {
+    if (/결제 ?완료되었습니다/.test(lines[i])) {
+      for (var j = i + 1; j < lines.length && j < i + 4; j++) if (lines[j] && lines[j] !== '폼보기') { out.merchant = lines[j]; break; }
+      break;
+    }
+  }
+  if (!out.merchant) {
+    var m = /^\[(.+)\]에 대하여/.exec(s);
+    out.merchant = m ? m[1] : '윗치폼';
+  }
+  var when = /(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})/.exec(after('결제일자') || after('주문일자'));
+  if (when) { out.date = when[1]; out.time = when[2]; }
+  else {
+    out.date = info.received.slice(0, 10); out.time = info.received.slice(11, 16);
+    out.unsure = '결제일자를 못 찾아 메일 받은 시각을 씀';
+  }
+  var amt = /([\d,]+)\s*원/.exec(after('최종 결제금액') || '');
+  if (amt) out.amount = Number(amt[1].replace(/,/g, ''));
+  else out.unsure = [out.unsure, '금액을 못 찾음'].filter(String).join(' / ');
+  var pm = after('결제방법');
+  if (pm) out.method = '윗치폼 · ' + pm;
+  var items = [], k = lines.indexOf('주문상품');
+  for (var n = k + 1; k >= 0 && n < lines.length; n++) {
+    var L = lines[n];
+    if (/^본 메일은/.test(L)) break;
+    if (L === '수량') continue;
+    var q = /^(\d+)개$/.exec(L);
+    if (q) { if (+q[1] > 1 && items.length) items[items.length - 1] += ' ×' + q[1]; continue; }
+    if (L) items.push(L);
+  }
+  out.items = items.join(', ');
+  return out;
+}
+
 /**
  * Google Play 영수증 읽기. 예)
  *   주문 날짜: 2026. 10. 28. 오후 10시 54분 44초 GMT+1
@@ -198,6 +253,7 @@ function mailParseGoogle_(info) {
     if (/₩/.test(lines[j])) break;
   }
   if (!item) out.unsure = [out.unsure, '상품명을 못 찾음'].filter(String).join(' / ');
+  item = item.replace(/\s*\(개발자:[^)]*\)\s*$/, '');
   out.items = item;
   var app = /\(([^()]+)\)\s*$/.exec(item);
   out.merchant = app ? app[1].trim() : (item || 'Google Play');
@@ -240,6 +296,10 @@ function mailClassify_(r, hints) {
     var x = hints.rules[j];
     if (x.kw && text.indexOf(x.kw) >= 0) return { cat: x.cat, sub: x.sub, note: '' };
   }
+  if (r.witch) {
+    var w = hints.stores[mailStoreKey_('파이어볼트')] || MAIL_WITCH_DEFAULT;
+    return { cat: w.cat, sub: w.sub, note: '' };
+  }
   if (r.subscription) return { cat: '구독', sub: '', note: '분류 추정(정기 결제)' };
   return { cat: '', sub: '', note: '분류 없음' };
 }
@@ -264,8 +324,11 @@ function mailAppend_(sh, rows) {
 }
 
 /**
- * '내역 id'가 빈 결제 줄을 '내역'과 짝짓는다: 금액이 같고 시각 차이 MAIL_MATCH_MINUTES분 이내 중 가장 가까운 것.
- * 이미 다른 메일과 짝지은 id는 쓰지 않는다. 앱이 나중에 동기화해도 다음 실행 때 다시 찾는다.
+ * '내역 id'가 빈 결제 줄을 '내역'과 짝짓는다. 금액이 같고:
+ *  - 시각 차이 MAIL_MATCH_MINUTES분 이내
+ *  - 구글 정기 결제는 카드가 영수증보다 하루 먼저 찍혀서, 같은 시각 하루 전(±MAIL_MATCH_MINUTES분)도 짝
+ *  - '내역'에 시각이 없는 줄(카드 명세서)은 같은 날(구글은 하루 전도)
+ * 중 가장 가까운 것. 이미 다른 메일과 짝지은 id는 쓰지 않는다. 앱이 나중에 동기화해도 다음 실행 때 다시 찾는다.
  */
 function mailMatch_(ss, sh) {
   var n = MAIL_HEADER.length;
@@ -275,19 +338,28 @@ function mailMatch_(ss, sh) {
   var txSh = ss.getSheetByName(SYNC_TX_SHEET);
   if (!txSh || txSh.getLastRow() < 2) return;
   var tx = txSh.getRange(2, 1, txSh.getLastRow() - 1, 4).getValues().map(function (r) {
-    return { id: String(r[0]), at: mailMinutes_(mailStr_(r[1]), mailStr_(r[2])), amount: Number(r[3]) };
-  }).filter(function (t) { return t.id && t.at != null; });
+    var date = mailStr_(r[1]), time = mailStr_(r[2]);
+    return { id: String(r[0]), at: mailMinutes_(date, time), day: mailMinutes_(date, '00:00'), amount: Number(r[3]) };
+  }).filter(function (t) { return t.id && t.day != null; });
   var used = {};
   mail.forEach(function (r) { if (r[14]) used[String(r[14])] = true; });
+  var DAY = 1440, W = MAIL_MATCH_MINUTES;
   mail.forEach(function (r, i) {
     if (r[14] || r[4] !== '결제' || r[7] === '' || /같은 결제 메일/.test(String(r[13]))) return;
     var at = mailMinutes_(mailStr_(r[5]), mailStr_(r[6]));
     if (at == null) return;
+    var day = at - at % DAY;
+    var prev = /google/i.test(String(r[2]));
     var best = null;
     tx.forEach(function (t) {
       if (used[t.id] || t.amount !== Number(r[7])) return;
-      var d = Math.abs(t.at - at);
-      if (d <= MAIL_MATCH_MINUTES && (!best || d < best.d)) best = { id: t.id, d: d };
+      var d = null;
+      if (t.at != null) {
+        if (Math.abs(t.at - at) <= W) d = Math.abs(t.at - at);
+        else if (prev && Math.abs(t.at - (at - DAY)) <= W) d = Math.abs(t.at - (at - DAY)) + 0.5;
+      } else if (t.day === day) d = 1000;
+      else if (prev && t.day === day - DAY) d = 1001;
+      if (d != null && (!best || d < best.d)) best = { id: t.id, d: d };
     });
     if (best) {
       used[best.id] = true;
