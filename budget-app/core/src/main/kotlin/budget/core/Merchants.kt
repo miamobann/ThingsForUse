@@ -104,5 +104,7 @@ object Categories {
     const val CASH_OUT = "현금인출"
     const val TRANSFER = "송금"
     const val UNCATEGORIZED = "미분류"
+    /** 분류가 애매해서 나중에 정할 결제. 대분류 값 그대로 시트에 나가고, 가게·단어 규칙으로는 기억하지 않는다. */
+    const val HOLD = "보류"
     val DEFAULT = listOf("식비", "카페·간식", "교통", "쇼핑", "구독", "여가", "생활", "의료", TRANSFER, "기타")
 }

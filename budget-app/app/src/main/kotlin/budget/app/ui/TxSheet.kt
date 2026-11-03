@@ -20,6 +20,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -34,11 +35,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.text.KeyboardOptions
+import java.time.LocalTime
 import androidx.compose.ui.unit.sp
 import budget.app.data.Prefs
 import budget.app.data.Repository
+import budget.core.Autocomplete
+import budget.core.Categories
 import budget.core.Installment
+import budget.core.Source
 import budget.core.Kind
 import budget.core.Offset
 import budget.core.Merchants
@@ -72,6 +79,17 @@ private fun TxEditor(t: Tx, onClose: () -> Unit) {
     var word by remember(t.id) { mutableStateOf("") }
     var include by remember(t.id) { mutableStateOf(t.includeInSpending) }
     var memo by remember(t.id) { mutableStateOf(t.memo) }
+    // 직접 입력 기록만: 가게명·금액·날짜·시각 고치기 (자동 기록은 짝짓기에 쓰여서 그대로 둔다)
+    val manual = t.source == Source.MANUAL
+    var name by remember(t.id) { mutableStateOf(t.merchant) }
+    var amountText by remember(t.id) { mutableStateOf(t.amount.toString()) }
+    var date by remember(t.id) { mutableStateOf(t.time.toLocalDate()) }
+    var time by remember(t.id) { mutableStateOf(if (t.timeKnown) t.time.toLocalTime() else null) }
+    val all = rememberData { it.all() } ?: emptyList()
+    var hiddenMerchants by remember { mutableStateOf(prefs.hiddenMerchantSuggestions) }
+    var hiddenMemos by remember { mutableStateOf(prefs.hiddenMemoSuggestions) }
+    val merchantCands = remember(all, hiddenMerchants) { Autocomplete.merchants(all, hiddenMerchants) }
+    val memoCands = remember(all, hiddenMemos) { Autocomplete.memos(all, hiddenMemos) }
     var newCategory by remember { mutableStateOf<String?>(null) }
     var confirmDelete by remember { mutableStateOf(false) }
 
@@ -80,6 +98,7 @@ private fun TxEditor(t: Tx, onClose: () -> Unit) {
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            if (t.category == Categories.HOLD) Text("보류한 결제예요. 지금 골라도 되고 나중에 모아서 정해도 돼요.", fontSize = 13.sp, color = C.accent, fontWeight = FontWeight.Medium)
             if (t.category == null) Text(
                 if (t.kind == Kind.INCOME) "처음 보는 입금이에요" else "처음 보는 가게예요",
                 fontSize = 13.sp, color = C.accent, fontWeight = FontWeight.Medium,
@@ -101,6 +120,19 @@ private fun TxEditor(t: Tx, onClose: () -> Unit) {
                     fontSize = 13.sp, color = C.accentDark, lineHeight = 19.sp,
                 )
             }
+        }
+
+        if (manual) {
+            AutoField(
+                name, { name = it }, "가게 이름", merchantCands,
+                onHide = { prefs.hiddenMerchantSuggestions = hiddenMerchants + it; hiddenMerchants = prefs.hiddenMerchantSuggestions },
+            )
+            OutlinedTextField(
+                amountText.toLongOrNull()?.let { "%,d".format(it) } ?: "", { v -> amountText = v.filter { it.isDigit() } },
+                Modifier.fillMaxWidth(), label = { Text("금액 (원)") }, singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            )
+            DateTimeInput(date, time, onDate = { date = it }, onTime = { time = it }, quickChips = false)
         }
 
         val income = t.kind == Kind.INCOME
@@ -190,13 +222,23 @@ private fun TxEditor(t: Tx, onClose: () -> Unit) {
 
         OffsetSection(t, onClose)
 
-        OutlinedTextField(memo, { memo = it }, Modifier.fillMaxWidth(), label = { Text("메모") }, singleLine = true)
+        AutoField(
+            memo, { memo = it }, "메모", memoCands,
+            onHide = { prefs.hiddenMemoSuggestions = hiddenMemos + it; hiddenMemos = prefs.hiddenMemoSuggestions },
+        )
 
         Button(
             onClick = {
                 val chosen = category
                 repo.writer.execute {
-                    val updated = t.copy(includeInSpending = include, memo = memo)
+                    val newAmount = amountText.toLongOrNull()?.takeIf { it > 0 }
+                    val updated = if (!manual) t.copy(includeInSpending = include, memo = memo.trim())
+                    else t.copy(
+                        includeInSpending = include, memo = memo.trim(),
+                        merchant = name.trim().ifEmpty { t.merchant }, originalMerchant = name.trim().ifEmpty { t.originalMerchant },
+                        amount = newAmount ?: t.amount,
+                        time = date.atTime(time ?: LocalTime.NOON), timeKnown = time != null,
+                    )
                     repo.update(updated)
                     if (chosen != null && (chosen != t.category || keepRule || word.isNotBlank())) repo.setCategory(updated, chosen, (keepRule && !agentOnly) || word.isNotBlank(), byAmount, word.takeIf { it.isNotBlank() })
                     repo.changed()
@@ -206,6 +248,20 @@ private fun TxEditor(t: Tx, onClose: () -> Unit) {
             modifier = Modifier.fillMaxWidth().height(52.dp),
             shape = RoundedCornerShape(14.dp),
         ) { Text("저장", fontSize = 16.sp, fontWeight = FontWeight.Bold) }
+
+        if (!income && t.kind != Kind.CANCEL) OutlinedButton(
+            onClick = {
+                repo.writer.execute {
+                    val updated = t.copy(includeInSpending = include, memo = memo.trim())
+                    repo.update(updated)
+                    repo.setCategory(updated, Categories.HOLD, remember = false)
+                    repo.changed()
+                }
+                onClose()
+            },
+            modifier = Modifier.fillMaxWidth().height(48.dp),
+            shape = RoundedCornerShape(14.dp),
+        ) { Text(if (t.category == Categories.HOLD) "보류 그대로 두기" else "보류 (나중에 분류)", fontSize = 15.sp) }
 
         Text(
             if (confirmDelete) "한 번 더 누르면 삭제돼요" else "이 기록 삭제",
@@ -221,14 +277,19 @@ private fun TxEditor(t: Tx, onClose: () -> Unit) {
     }
 }
 
-/** 분류 안 된 결제 모아 보기 */
+/** 분류 안 된 결제 모아 보기. held면 보류한 결제 */
 @Composable
-fun UncategorizedScreen(onBack: () -> Unit, openTx: (Long) -> Unit) {
-    val list = rememberData { it.uncategorized() } ?: return
+fun UncategorizedScreen(onBack: () -> Unit, held: Boolean = false, openTx: (Long) -> Unit) {
+    val list = rememberData(held) { if (held) it.held() else it.uncategorized() } ?: return
     Column(Modifier.fillMaxSize()) {
-        TopBar("분류 안 된 내역 ${list.size}건", onBack)
+        TopBar(if (held) "보류한 결제 ${list.size}건" else "분류 안 된 내역 ${list.size}건", onBack)
         if (list.isEmpty()) {
-            Text("모두 분류했어요", Modifier.padding(24.dp), color = C.sub)
+            Text(if (held) "보류한 결제가 없어요" else "모두 분류했어요", Modifier.padding(24.dp), color = C.sub)
+        } else if (held) {
+            Text(
+                "메일 영수증과 짝지어지면 자동으로 분류돼요. 나머지는 하나씩 누르거나 분석 화면에서 한 번에 분류하세요.",
+                Modifier.padding(start = 20.dp, end = 20.dp, bottom = 12.dp), fontSize = 13.sp, color = C.sub, lineHeight = 18.sp,
+            )
         }
         LazyColumn(Modifier.padding(horizontal = 16.dp).clip(RoundedCornerShape(18.dp)).background(C.card)) {
             items(list, key = { it.id }) { t ->

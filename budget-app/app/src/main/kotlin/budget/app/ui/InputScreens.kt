@@ -3,6 +3,7 @@ package budget.app.ui
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -16,6 +17,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -25,6 +27,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -35,6 +38,9 @@ import budget.app.data.Prefs
 import budget.app.data.Repository
 import budget.app.ingest.Ingest
 import budget.core.AppCsv
+import budget.core.Autocomplete
+import budget.core.SameDay
+import budget.core.Tx
 import budget.core.HyundaiCardFileParser
 import budget.core.Parsed
 import budget.core.ImportPreview
@@ -46,28 +52,76 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.nio.charset.Charset
 import java.time.LocalDate
-import java.time.LocalDateTime
 import java.time.LocalTime
-import java.time.format.DateTimeFormatter
 
-/** 직접 입력: 현금 지출, 저축(적금 등 문자가 안 오는 것), 수입 */
+/** 직접 입력: 현금 지출, 저축(적금 등 문자가 안 오는 것), 수입. 지난 날짜·시각, 가게명·메모 따로, 자동 완성. */
 @Composable
 fun AddCashScreen(onDone: () -> Unit) {
     val ctx = LocalContext.current
     val prefs = Prefs(ctx)
+    val repo = Repository.get(ctx)
+    val scope = rememberCoroutineScope()
     var amount by remember { mutableStateOf("") }
     var where by remember { mutableStateOf("") }
+    var memo by remember { mutableStateOf("") }
     var date by remember { mutableStateOf(LocalDate.now()) }
+    var time by remember { mutableStateOf<LocalTime?>(LocalTime.now().withSecond(0).withNano(0)) }
     var category by remember { mutableStateOf(prefs.categories.first()) }
     var method by remember { mutableStateOf("현금") }
     var type by remember { mutableStateOf("지출") }
+    var sameDay by remember { mutableStateOf<List<Tx>?>(null) }
+    var savedCount by remember { mutableStateOf(0) }
+    var hiddenMerchants by remember { mutableStateOf(prefs.hiddenMerchantSuggestions) }
+    var hiddenMemos by remember { mutableStateOf(prefs.hiddenMemoSuggestions) }
     val value = amount.filter { it.isDigit() }.toLongOrNull() ?: 0L
+    val all = rememberData { it.all() } ?: emptyList()
+    val merchantCands = remember(all, hiddenMerchants) { Autocomplete.merchants(all, hiddenMerchants) }
+    val memoCands = remember(all, hiddenMemos) { Autocomplete.memos(all, hiddenMemos) }
+    val kind = when (type) {
+        MoneyFlow.SAVING -> Kind.TRANSFER
+        MoneyFlow.EARNED -> Kind.INCOME
+        else -> Kind.PAYMENT
+    }
+
+    fun save(keepGoing: Boolean) {
+        val (k, cat) = when (type) {
+            MoneyFlow.SAVING -> Kind.TRANSFER to MoneyFlow.SAVING
+            MoneyFlow.EARNED -> Kind.INCOME to MoneyFlow.EARNED
+            else -> Kind.PAYMENT to category
+        }
+        val name = where.trim().ifEmpty { if (type == "지출") method.substringBefore(" (") else type }
+        val at = date.atTime(time ?: LocalTime.NOON)
+        Ingest.addManual(
+            ctx,
+            Parsed(Source.MANUAL, k, value, name, at, timeKnown = time != null, raw = if (type == "지출") method else "", detail = memo.trim()),
+            cat,
+        )
+        sameDay = null
+        if (keepGoing) {
+            savedCount++
+            amount = ""
+            where = ""
+            memo = ""
+        } else onDone()
+    }
+
+    /** 같은 날 같은 금액 기록이 있으면 먼저 보여주고, 한 번 더 누르면 저장 */
+    fun trySave(keepGoing: Boolean) {
+        if (sameDay != null) return save(keepGoing)
+        scope.launch {
+            val found = withContext(Dispatchers.IO) {
+                SameDay.find(repo.between(date.atStartOfDay(), date.plusDays(1).atStartOfDay()), date, value, kind)
+            }
+            if (found.isEmpty()) save(keepGoing) else sameDay = found
+        }
+    }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         TopBar("직접 입력", onDone)
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
+            if (savedCount > 0) Text("${savedCount}건 저장했어요. 이어서 입력하세요.", fontSize = 13.sp, color = C.accentDark, fontWeight = FontWeight.Medium)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("지출", MoneyFlow.SAVING, MoneyFlow.EARNED).forEach { k -> Chip(k, type == k, Modifier.weight(1f)) { type = k } }
+                listOf("지출", MoneyFlow.SAVING, MoneyFlow.EARNED).forEach { k -> Chip(k, type == k, Modifier.weight(1f)) { type = k; sameDay = null } }
             }
             if (type != "지출") Text(
                 if (type == MoneyFlow.SAVING) "적금처럼 문자가 안 오는 저축을 적어요. 지출·예산에서 빠지고, 이번 달 저축에 더해져요."
@@ -75,20 +129,40 @@ fun AddCashScreen(onDone: () -> Unit) {
                 fontSize = 13.sp, color = C.sub, lineHeight = 18.sp,
             )
             OutlinedTextField(
-                if (value > 0) "%,d".format(value) else "", { amount = it },
+                if (value > 0) "%,d".format(value) else "", { amount = it; sameDay = null },
                 Modifier.fillMaxWidth(), label = { Text("금액 (원)") }, singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 textStyle = androidx.compose.ui.text.TextStyle(fontSize = 26.sp, fontWeight = FontWeight.Bold),
             )
-            OutlinedTextField(where, { where = it }, Modifier.fillMaxWidth(), label = { Text("어디서 / 메모") }, singleLine = true)
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("날짜", fontSize = 13.sp, color = C.sub)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf("오늘" to LocalDate.now(), "어제" to LocalDate.now().minusDays(1), "그저께" to LocalDate.now().minusDays(2))
-                        .forEach { (label, d) -> Chip(label, date == d, Modifier.weight(1f)) { date = d } }
-                }
-                Text(date.format(DateTimeFormatter.ofPattern("yyyy년 M월 d일")), fontSize = 13.sp, color = C.sub)
-            }
+            AutoField(
+                where, { where = it },
+                when (type) {
+                    MoneyFlow.SAVING -> "어디로 (예: 적금 은행)"
+                    MoneyFlow.EARNED -> "어디서 (예: 회사)"
+                    else -> "가게 이름"
+                },
+                merchantCands,
+                onHide = { prefs.hiddenMerchantSuggestions = hiddenMerchants + it; hiddenMerchants = prefs.hiddenMerchantSuggestions },
+                onPick = { name ->
+                    if (type == "지출") scope.launch {
+                        val remembered = withContext(Dispatchers.IO) { repo.ruleFor(name, Kind.PAYMENT, value.takeIf { it > 0 }, name.lowercase()) }
+                        if (remembered != null && remembered in prefs.categories) category = remembered
+                    }
+                },
+            )
+            AutoField(
+                memo, { memo = it }, "메모 (선택)", memoCands,
+                onHide = { prefs.hiddenMemoSuggestions = hiddenMemos + it; hiddenMemos = prefs.hiddenMemoSuggestions },
+            )
+            DateTimeInput(
+                date, time,
+                onDate = { d ->
+                    date = d
+                    time = if (d == LocalDate.now()) LocalTime.now().withSecond(0).withNano(0) else null
+                    sameDay = null
+                },
+                onTime = { time = it },
+            )
             if (type == "지출") Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("카테고리", fontSize = 13.sp, color = C.sub)
                 prefs.categories.chunked(4).forEach { row ->
@@ -104,26 +178,33 @@ fun AddCashScreen(onDone: () -> Unit) {
                     listOf("현금", "기타 (상품권 등)").forEach { m -> Chip(m, method == m, Modifier.weight(1f)) { method = m } }
                 }
             }
+            sameDay?.let { list ->
+                Column(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(C.card).padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text("같은 날 같은 금액 기록이 이미 있어요", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = C.warn)
+                    list.take(3).forEach { t ->
+                        Text(
+                            "${t.merchant} · ${if (t.timeKnown) t.time.format(MD_HM) else t.time.format(MD)} · ${t.source.label}",
+                            fontSize = 13.sp, color = C.sub,
+                        )
+                    }
+                    Text("같은 결제면 저장하지 마세요. 다른 결제면 아래 버튼을 한 번 더 누르면 저장돼요.", fontSize = 12.sp, color = C.sub, lineHeight = 17.sp)
+                }
+            }
             Button(
                 enabled = value > 0,
-                onClick = {
-                    val time = if (date == LocalDate.now()) LocalDateTime.now() else date.atTime(LocalTime.NOON)
-                    val (kind, cat) = when (type) {
-                        MoneyFlow.SAVING -> Kind.TRANSFER to MoneyFlow.SAVING
-                        MoneyFlow.EARNED -> Kind.INCOME to MoneyFlow.EARNED
-                        else -> Kind.PAYMENT to category
-                    }
-                    val name = where.trim().ifEmpty { if (type == "지출") "현금" else type }
-                    Ingest.addManual(
-                        ctx,
-                        Parsed(Source.MANUAL, kind, value, name, time, timeKnown = date == LocalDate.now(), raw = if (type == "지출") method else ""),
-                        cat,
-                    )
-                    onDone()
-                },
+                onClick = { trySave(false) },
                 modifier = Modifier.fillMaxWidth().height(54.dp),
                 shape = RoundedCornerShape(14.dp),
-            ) { Text("저장", fontSize = 16.sp, fontWeight = FontWeight.Bold) }
+            ) { Text(if (sameDay != null) "그래도 저장" else "저장", fontSize = 16.sp, fontWeight = FontWeight.Bold) }
+            OutlinedButton(
+                enabled = value > 0,
+                onClick = { trySave(true) },
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+                shape = RoundedCornerShape(14.dp),
+            ) { Text(if (sameDay != null) "그래도 저장하고 계속 입력" else "저장하고 계속 입력", fontSize = 15.sp) }
         }
     }
 }

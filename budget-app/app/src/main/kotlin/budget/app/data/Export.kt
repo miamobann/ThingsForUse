@@ -38,7 +38,8 @@ object Export {
         Channel.CARD -> "현대카드"
         Channel.BANK -> "농협"
         Channel.NAVERPAY -> if (t.linkedNaverPay) "현대카드" else "네이버페이"
-        Channel.MANUAL -> "현금"
+        // 직접 입력에서 고른 결제수단은 raw에 들어 있다 ("현금", "기타 (상품권 등)")
+        Channel.MANUAL -> if (t.kind == Kind.PAYMENT && t.raw.startsWith("기타")) "기타" else "현금"
     }
 
     fun csv(txs: List<Tx>, cutoff: Int): String {

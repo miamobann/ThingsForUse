@@ -47,6 +47,15 @@ class Prefs(ctx: Context) {
         get() = p.getStringSet("dismissed_dup", emptySet())!!.toSet()
         set(v) = p.edit().putStringSet("dismissed_dup", v).apply()
 
+    /** 자동 완성에서 숨긴 가게명·메모 */
+    var hiddenMerchantSuggestions: Set<String>
+        get() = p.getStringSet("ac_hidden_merchant", emptySet())!!.toSet()
+        set(v) = p.edit().putStringSet("ac_hidden_merchant", v).apply()
+
+    var hiddenMemoSuggestions: Set<String>
+        get() = p.getStringSet("ac_hidden_memo", emptySet())!!.toSet()
+        set(v) = p.edit().putStringSet("ac_hidden_memo", v).apply()
+
     fun alertsSent(ym: YearMonth): Set<Int> =
         p.getStringSet("alerts_$ym", emptySet())!!.mapNotNull { it.toIntOrNull() }.toSet()
 
