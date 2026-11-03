@@ -8,6 +8,9 @@
  *     윗치폼 '주문 내역 안내' 메일은 결제완료 메일과 겹쳐서 건너뛴다.
  *  3. 분류는 '분류 자료'의 가게 기억 → 단어 규칙 순으로 찾고, 없으면 구글 정기 결제는 '구독', 윗치폼은 '여가·굿즈'로 추정.
  *  4. '메일' 시트에 한 줄씩 쌓고 '내역'에서 금액이 같은 앱 기록을 찾아 id를 적는다 (mailMatch_ 참고).
+ *  5. 처음 짝지어지는 순간 한 번만, 그 기록의 분류를 메일 분류로 '분류 자료' 건별 줄에 쓴다 → 앱이 다음 동기화 때 받아 감.
+ *     그 뒤에 앱·분석기에서 직접 고친 분류는 다시 덮지 않는다. 분류가 비었거나 추정인 메일은 쓰지 않는다.
+ *  6. 단, 짝지어진 기록의 대분류가 '보류'면 실행할 때마다 메일 분류로 바꾼다(추정 분류도 씀). 나중에 보류로 바꾼 건도 포함.
  * 읽은 메일은 숨김 시트 '메일 기록'에 남겨 다시 읽지 않는다.
  *
  * 처음 한 번: 편집기에서 mailSetup 실행 (Gmail 권한 허용). 멈추려면 mailStop.
@@ -329,6 +332,7 @@ function mailAppend_(sh, rows) {
  *  - 구글 정기 결제는 카드가 영수증보다 하루 먼저 찍혀서, 같은 시각 하루 전(±MAIL_MATCH_MINUTES분)도 짝
  *  - '내역'에 시각이 없는 줄(카드 명세서)은 같은 날(구글은 하루 전도)
  * 중 가장 가까운 것. 이미 다른 메일과 짝지은 id는 쓰지 않는다. 앱이 나중에 동기화해도 다음 실행 때 다시 찾는다.
+ * 새로 짝지은 줄은 mailApplyCategories_ 로 그 기록의 분류를 한 번 덮어쓴다.
  */
 function mailMatch_(ss, sh) {
   var n = MAIL_HEADER.length;
@@ -337,13 +341,16 @@ function mailMatch_(ss, sh) {
   var mail = sh.getRange(2, 1, last - 1, n).getValues();
   var txSh = ss.getSheetByName(SYNC_TX_SHEET);
   if (!txSh || txSh.getLastRow() < 2) return;
-  var tx = txSh.getRange(2, 1, txSh.getLastRow() - 1, 4).getValues().map(function (r) {
+  var txCat = {};
+  var tx = txSh.getRange(2, 1, txSh.getLastRow() - 1, 7).getValues().map(function (r) {
     var date = mailStr_(r[1]), time = mailStr_(r[2]);
+    txCat[String(r[0])] = String(r[6]);
     return { id: String(r[0]), at: mailMinutes_(date, time), day: mailMinutes_(date, '00:00'), amount: Number(r[3]) };
   }).filter(function (t) { return t.id && t.day != null; });
   var used = {};
   mail.forEach(function (r) { if (r[14]) used[String(r[14])] = true; });
   var DAY = 1440, W = MAIL_MATCH_MINUTES;
+  var assign = [];
   mail.forEach(function (r, i) {
     if (r[14] || r[4] !== '결제' || r[7] === '' || /같은 결제 메일/.test(String(r[13]))) return;
     var at = mailMinutes_(mailStr_(r[5]), mailStr_(r[6]));
@@ -363,9 +370,52 @@ function mailMatch_(ss, sh) {
     });
     if (best) {
       used[best.id] = true;
+      r[14] = best.id;
       sh.getRange(i + 2, 15).setNumberFormat('@').setValue(best.id);
+      if (r[11] && !/추정|분류 없음/.test(String(r[13]))) assign.push({ id: best.id, cat: String(r[11]), sub: String(r[12] || '') });
     }
   });
+
+  // 대분류가 '보류'인 짝지어진 기록은 메일 분류로 (분류 자료 건별 대분류가 있으면 그걸, 없으면 앱 카테고리를 본다)
+  var metaCat = mailMetaCategories_(ss);
+  var queued = {};
+  assign.forEach(function (a) { queued[a.id] = true; });
+  mail.forEach(function (r) {
+    var id = String(r[14] || '');
+    if (!id || queued[id] || r[4] !== '결제' || !r[11]) return;
+    var cur = metaCat[id] ? metaCat[id] : txCat[id];
+    if (cur === '보류') { assign.push({ id: id, cat: String(r[11]), sub: String(r[12] || '') }); queued[id] = true; }
+  });
+  if (assign.length) mailApplyCategories_(ss, assign);
+}
+
+/** '분류 자료' 건별 줄의 대분류 { 앱 id: 대분류 } (빈 칸은 뺌) */
+function mailMetaCategories_(ss) {
+  var sh = ss.getSheetByName(SYNC_META_SHEET);
+  var out = {};
+  if (!sh || sh.getLastRow() < 2) return out;
+  sh.getRange(2, 1, sh.getLastRow() - 1, 3).getValues().forEach(function (r) {
+    if (String(r[0]) === '건별' && String(r[2]) !== '') out[String(r[1])] = String(r[2]);
+  });
+  return out;
+}
+
+/**
+ * '분류 자료'의 건별 줄(종류='건별', 키=앱 id)에 대분류·소분류를 쓴다. 값(지출 포함·제외 표시)은 그대로 둔다.
+ * 앱은 다음 동기화 때 건별 대분류를 받아 가고, 분석 화면은 '다시 읽기' 때 보인다.
+ */
+function mailApplyCategories_(ss, assign) {
+  var sh = syncSheet_(ss, SYNC_META_SHEET, SYNC_META_HEADER);
+  var last = sh.getLastRow();
+  var data = last > 1 ? sh.getRange(2, 1, last - 1, 2).getValues() : [];
+  var rowOf = {};
+  data.forEach(function (r, i) { if (String(r[0]) === '건별') rowOf[String(r[1])] = i + 2; });
+  var add = [];
+  assign.forEach(function (a) {
+    if (rowOf[a.id]) sh.getRange(rowOf[a.id], 3, 1, 2).setNumberFormat('@').setValues([[a.cat, a.sub]]);
+    else add.push(['건별', a.id, a.cat, a.sub, '']);
+  });
+  if (add.length) sh.getRange(sh.getLastRow() + 1, 1, add.length, 5).setNumberFormat('@').setValues(add);
 }
 
 function mailStr_(v) {
