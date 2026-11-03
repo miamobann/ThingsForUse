@@ -5,6 +5,7 @@ import android.content.Context
 import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
+import budget.core.Categories
 import budget.core.Kind
 import budget.core.Merchants
 import budget.core.MoneyFlow
@@ -94,6 +95,13 @@ class Repository private constructor(ctx: Context) {
     fun uncategorized(): List<Tx> =
         query("SELECT * FROM tx WHERE category IS NULL AND cancelled = 0 ORDER BY time DESC")
 
+    /** 보류로 둔 기록 */
+    fun held(): List<Tx> =
+        query("SELECT * FROM tx WHERE category = ? AND cancelled = 0 ORDER BY time DESC", Categories.HOLD)
+
+    /** 같은 가게·단어 규칙을 만들 때 같이 채울 기록: 미분류 + 보류 */
+    private fun undecided(): List<Tx> = uncategorized() + held()
+
     /** 아직 결제와 연결하지 않은 돌려받은 돈·환불 (최근 [days]일) */
     fun openRefunds(days: Long = 92): List<Tx> =
         query(
@@ -151,15 +159,16 @@ class Repository private constructor(ctx: Context) {
      */
     fun setCategory(t: Tx, category: String, remember: Boolean, byAmount: Boolean = false, word: String? = null) {
         update(MoneyFlow.withCategory(t, category))
+        if (category == Categories.HOLD) return
         val w = word?.trim()?.lowercase().orEmpty()
         if (remember && w.isNotEmpty()) {
             putRule(Rules.wordKey(w), category)
             onWordRuleEdited?.invoke(w, category)
-            uncategorized().filter { Rules.textOf(it).contains(w) }.forEach { update(MoneyFlow.withCategory(it, category)) }
+            undecided().filter { Rules.textOf(it).contains(w) }.forEach { update(MoneyFlow.withCategory(it, category)) }
         } else if (remember && !Merchants.isPaymentAgentOnly(t.merchant)) {
             val key = MoneyFlow.ruleKey(t.merchant, t.kind)
             putRule(if (byAmount) Rules.amountKey(key, t.amount) else key, category)
-            uncategorized().filter { MoneyFlow.ruleKey(it.merchant, it.kind) == key && (!byAmount || it.amount == t.amount) }
+            undecided().filter { MoneyFlow.ruleKey(it.merchant, it.kind) == key && (!byAmount || it.amount == t.amount) }
                 .forEach { update(MoneyFlow.withCategory(it, ruleFor(it) ?: category)) }
         }
     }

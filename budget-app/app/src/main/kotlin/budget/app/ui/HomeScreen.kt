@@ -49,6 +49,7 @@ private data class HomeData(
     val topCategories: List<Pair<String, Long>>,
     val uncategorizedPay: Int,
     val uncategorizedIncome: Int,
+    val held: Int,
     val openRefunds: Int,
     val unparsed: Int,
     val recurring: List<Recurring>,
@@ -83,6 +84,7 @@ fun HomeScreen(go: (Screen) -> Unit, openTx: (Long) -> Unit) {
             topCategories = stats.byCategory(ym).take(3),
             uncategorizedPay = uncategorized.count { it.kind != Kind.INCOME },
             uncategorizedIncome = uncategorized.count { it.kind == Kind.INCOME },
+            held = repo.held().size,
             openRefunds = repo.openRefunds().size,
             unparsed = repo.unparsed().size,
             recurring = recurring,
@@ -107,6 +109,7 @@ fun HomeScreen(go: (Screen) -> Unit, openTx: (Long) -> Unit) {
         val checks = buildList<Triple<String, String, Screen>> {
             if (data.uncategorizedIncome > 0) add(Triple("구분 안 한 입금 ${data.uncategorizedIncome}건 (수입? 돌려받은 돈?)", "고르기", Screen.Uncategorized))
             if (data.uncategorizedPay > 0) add(Triple("분류 안 된 결제 ${data.uncategorizedPay}건", "고르기", Screen.Uncategorized))
+            if (data.held > 0) add(Triple("보류한 결제 ${data.held}건", "분류하기", Screen.Held))
             if (data.openRefunds > 0) add(Triple("결제와 상계 안 한 돌려받은 돈·환불 ${data.openRefunds}건", "보기", Screen.Refunds))
             if (data.duplicates > 0) add(Triple("중복 의심 결제 ${data.duplicates}건", "확인", Screen.Duplicates))
             if (data.unparsed > 0) add(Triple("읽지 못한 알림 ${data.unparsed}건", "보기", Screen.Unparsed))

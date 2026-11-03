@@ -50,6 +50,7 @@ sealed interface Screen {
     data object AddCash : Screen
     data object Import : Screen
     data object Uncategorized : Screen
+    data object Held : Screen
     data object Unparsed : Screen
     data object Refunds : Screen
     data object Recurring : Screen
@@ -157,6 +158,7 @@ class MainActivity : FragmentActivity() {
                     Screen.AddCash -> AddCashScreen(onDone = { screen = Screen.Home })
                     Screen.Import -> ImportScreen(onDone = { screen = Screen.Home })
                     Screen.Uncategorized -> UncategorizedScreen(onBack = { screen = Screen.Home }) { openTx = it }
+                    Screen.Held -> UncategorizedScreen(onBack = { screen = Screen.Home }, held = true) { openTx = it }
                     Screen.Unparsed -> UnparsedScreen(onBack = { screen = Screen.Settings })
                     Screen.Refunds -> RefundsScreen(onBack = { screen = Screen.Home }) { openTx = it }
                     Screen.Recurring -> RecurringScreen(onBack = { screen = Screen.Home })
