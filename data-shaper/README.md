@@ -15,6 +15,8 @@
 
 ## 보안
 
+- 새로고침 복원: 파일 내용과 작업 상태를 이 PC 브라우저(IndexedDB)에 저장해 같은 탭에서 새로고침하면 복원. 새 탭에서는 복원 안 하고, 닫힌 탭의 저장분은 2분 지나면 다음에 열 때 지움. 파일 이름 옆 "닫기"를 누르면 바로 지움
+
 - 파일은 브라우저 메모리 안에서만 처리. 서버 전송 없음.
 - HTML 안에 CSP(`connect-src 'none'` 등)를 넣어 브라우저가 외부 통신 자체를 막음.
 - 엑셀 라이브러리(SheetJS 0.18.5 Apache-2.0: 값 읽기, ExcelJS 4.4.0 MIT: 서식 읽기·엑셀 쓰기)는 파일 안에 포함. 외부 CDN 호출 없음.
@@ -54,6 +56,7 @@ python3 build.py              # src/ + vendor/ → data-shaper.html
 node test/make-samples.js     # 가짜 테스트 데이터 생성 (test/samples/)
 node test/e2e.js              # 브라우저 동작 + 외부 요청 0건 확인 (playwright)
 python3 test/make-styled-sample.py && node test/e2e-style.js   # 서식 유지 확인
+node test/e2e-reload.js       # 새로고침 복원 확인
 ```
 
 `data-shaper.html`은 빌드 결과물. 수정은 `src/`에서 하고 빌드.

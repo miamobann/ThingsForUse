@@ -1438,6 +1438,7 @@ function changed(full) {
 }
 function refresh(full) {
   runPipeline();
+  saveSession();
   if (full) renderSteps(); else updateStepMeta();
   renderReadInfo();
   renderView();
@@ -1761,7 +1762,8 @@ function renderFile() {
   const fi = $('fileInfo'); fi.textContent = '';
   fi.classList.toggle('muted', !S.wb);
   if (!S.wb) { fi.textContent = '파일을 올리면 여기에 표시'; return; }
-  fi.append(h('span', { class: 'fname' }, S.fileName), h('button', { class: 'link re', onclick: () => $('fileIn').click() }, '다른 파일'));
+  fi.append(h('span', { class: 'fname' }, S.fileName), h('button', { class: 'link re', onclick: () => $('fileIn').click() }, '다른 파일'),
+    h('button', { class: 'link re', title: '파일을 닫고 브라우저에 저장된 작업도 지움', onclick: closeFile }, '닫기'));
   const sl = $('sheetList'); sl.textContent = '';
   if (S.wb.SheetNames.length > 1 || !S.isCsv) {
     for (const sn of S.wb.SheetNames) {
@@ -2274,11 +2276,119 @@ function migrateOldStore() {
   } catch (e) { /* 무시 */ }
 }
 
+// ───────────────────────── 새로고침 복원 (같은 탭 한정) ─────────────────────────
+// 파일 내용과 작업 상태를 이 PC 브라우저의 IndexedDB에 저장. 서버 전송 없음.
+// 탭마다 sessionStorage 토큰을 두고, 토큰이 같을 때(새로고침)만 복원.
+// 열려 있는 탭은 30초마다 표시를 갱신하고, 2분 넘게 갱신 없는 저장분(닫힌 탭)은 지움.
+const SESS_DB = 'data-shaper-session';
+const ALIVE_MS = 30000, STALE_MS = 120000;
+let sessToken = null, sessSaveTimer = null;
+
+function idb() {
+  return new Promise((res, rej) => {
+    const rq = indexedDB.open(SESS_DB, 1);
+    rq.onupgradeneeded = () => { rq.result.createObjectStore('files'); rq.result.createObjectStore('states'); };
+    rq.onsuccess = () => res(rq.result);
+    rq.onerror = () => rej(rq.error);
+  });
+}
+async function idbDo(store, mode, fn) {
+  const db = await idb();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(store, mode);
+    const r = fn(tx.objectStore(store));
+    tx.oncomplete = () => { db.close(); res(r && r.result); };
+    tx.onerror = () => { db.close(); rej(tx.error); };
+  });
+}
+const idbGet = (store, key) => idbDo(store, 'readonly', (s) => s.get(key));
+const idbPut = (store, key, val) => idbDo(store, 'readwrite', (s) => s.put(val, key));
+const idbDel = (store, key) => idbDo(store, 'readwrite', (s) => s.delete(key));
+const idbAll = (store) => idbDo(store, 'readonly', (s) => s.getAllKeys());
+
+function sessionState() {
+  const sheets = {};
+  for (const [sn, sh] of Object.entries(S.sheets)) {
+    sheets[sn] = { read: sh.read, steps: sh.steps.map(({ _scroll, ...rest }) => rest), toggled: [...sh.toggled], fmt: sh.fmt || { cols: {}, head: {} } };
+  }
+  return {
+    alive: Date.now(), fileName: S.fileName, sheet: S.sheet, view: S.view, fmtView: S.fmtView, sheets,
+    outFmt: $('outFmt').value, outName: $('outName').value, ruleName: $('ruleName').value,
+  };
+}
+function saveSession() {
+  if (!sessToken || !S.wb) return;
+  clearTimeout(sessSaveTimer);
+  sessSaveTimer = setTimeout(() => { idbPut('states', sessToken, sessionState()).catch(() => {}); }, 400);
+}
+async function saveSessionFile(name, buf) {
+  if (!sessToken) return;
+  try { await idbPut('files', sessToken, { name, buf }); } catch (e) { /* 저장소 막힘: 복원만 안 됨 */ }
+}
+async function clearSession() {
+  if (!sessToken) return;
+  try { await idbDel('files', sessToken); await idbDel('states', sessToken); } catch (e) { /* 무시 */ }
+}
+// 닫힌 탭이 남긴 저장분 정리
+async function sweepSessions() {
+  try {
+    const keys = await idbAll('states');
+    for (const k of keys) {
+      if (k === sessToken) continue;
+      const st = await idbGet('states', k);
+      if (!st || Date.now() - (st.alive || 0) > STALE_MS) { await idbDel('states', k); await idbDel('files', k); }
+    }
+    // 상태 없이 파일만 남은 것도 정리
+    for (const k of await idbAll('files')) {
+      if (k !== sessToken && !(await idbGet('states', k))) await idbDel('files', k);
+    }
+  } catch (e) { /* 무시 */ }
+}
+async function initSession() {
+  try {
+    sessToken = sessionStorage.getItem('data-shaper-tab');
+    if (!sessToken) { sessToken = `${Date.now()}-${Math.random().toString(36).slice(2)}`; sessionStorage.setItem('data-shaper-tab', sessToken); }
+  } catch (e) { sessToken = null; return; }
+  await sweepSessions();
+  setInterval(() => { if (S.wb) idbPut('states', sessToken, sessionState()).catch(() => {}); }, ALIVE_MS);
+  let f, st;
+  try { f = await idbGet('files', sessToken); st = await idbGet('states', sessToken); } catch (e) { return; }
+  if (!f || !st) return;
+  await openFile(new File([f.buf], f.name), { restore: true });
+  if (!S.wb) return;
+  for (const [sn, x] of Object.entries(st.sheets || {})) {
+    const sh = S.sheets[sn]; if (!sh) continue;
+    if (x.read) Object.assign(sh.read, x.read);
+    sh.steps = (x.steps || []).filter((s) => STEP_DEFS[s.type]);
+    sh.toggled = new Set(x.toggled || []);
+    sh.fmt = x.fmt && x.fmt.cols ? x.fmt : { cols: {}, head: {} };
+  }
+  if (st.sheet && S.sheets[st.sheet]) S.sheet = st.sheet;
+  S.view = st.view || 'result';
+  S.fmtView = st.fmtView !== false; $('fmtView').checked = S.fmtView;
+  if (st.outFmt) $('outFmt').value = st.outFmt;
+  $('ruleName').value = st.ruleName || '';
+  renderFile(); renderRead(); refresh(true); renderRules();
+  if (st.outName) $('outName').value = st.outName;
+  toast('새로고침 전 화면 복원');
+}
+function closeFile() {
+  clearSession();
+  closeFmtPop();
+  S.wb = null; S.sheets = {}; S.sheet = null; S.out = null; S.base = null; S.fileName = '';
+  ['toolbar', 'panelRead', 'panelSteps', 'panelRules', 'legend'].forEach((id) => { $(id).hidden = true; });
+  $('view').hidden = true; $('view').textContent = ''; $('drop').hidden = false;
+  $('sheetList').textContent = ''; $('steps').textContent = ''; $('ruleName').value = '';
+  renderFile();
+  toast('파일 닫음 · 브라우저에 저장된 작업도 지움');
+}
+
 // ───────────────────────── 파일 열기 ─────────────────────────
-async function openFile(file) {
+async function openFile(file, opt = {}) {
   if (!file) return;
   try {
     const { wb, csv } = await readWorkbook(file);
+    if (!opt.restore) await saveSessionFile(file.name, await file.arrayBuffer());
     const xwb = csv ? null : await loadStyles(file);
     S.fileName = file.name; S.wb = wb; S.isCsv = csv; S.sheets = {}; S.hasStyles = !!xwb;
     let first = null;
@@ -2296,6 +2406,7 @@ async function openFile(file) {
     $('panelSteps').hidden = false;
     $('panelRules').hidden = false;
     renderFile(); renderRead(); refresh(true); updateOutName(); renderRules();
+    if (opt.restore) return;
     const n = readLib().filter((r) => r.sheet === S.sheet).length;
     toast(`${file.name} 읽음 · 시트 ${wb.SheetNames.length}개${n ? ` · 이 시트용 저장 규칙 ${n}개 있음` : ''}`);
   } catch (e) {
@@ -2318,8 +2429,10 @@ function bind() {
   $('btnResetRule').onclick = resetRule;
   $('btnAdd').onclick = () => { const m = $('addMenu'); m.hidden = !m.hidden; };
   $('btnDown').onclick = doDownload;
-  document.querySelectorAll('.tab').forEach((b) => { b.onclick = () => { S.view = b.dataset.view; closeFmtPop(); renderView(); }; });
-  $('fmtView').onchange = (e) => { S.fmtView = e.target.checked; renderView(); };
+  document.querySelectorAll('.tab').forEach((b) => { b.onclick = () => { S.view = b.dataset.view; closeFmtPop(); renderView(); saveSession(); }; });
+  $('fmtView').onchange = (e) => { S.fmtView = e.target.checked; renderView(); saveSession(); };
+  ['outFmt', 'outName', 'ruleName'].forEach((id) => $(id).addEventListener('input', saveSession));
+  $('outFmt').addEventListener('change', saveSession);
   // 편집 창 바깥 누르면 닫기 (머리글 클릭은 위에서 처리)
   document.addEventListener('mousedown', (e) => { const p = $('fmtPop'); if (p && !p.contains(e.target) && !e.target.closest('th.fh')) closeFmtPop(); });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeFmtPop(); });
@@ -2368,6 +2481,7 @@ function bind() {
   migrateOldStore();
 }
 bind();
+initSession();
 </script>
 </body>
 </html>
