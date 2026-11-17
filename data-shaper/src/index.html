@@ -41,8 +41,6 @@
     <section class="panel" id="panelSteps" hidden>
       <div class="panel-h"><span class="num">3</span>가공 단계
         <div class="panel-actions">
-          <button class="btn ghost sm" id="btnSaveRule" title="브라우저에 저장된 규칙 전체를 JSON 파일로 내보내기">내보내기</button>
-          <button class="btn ghost sm" id="btnLoadRule" title="내보낸 JSON 파일을 브라우저에 가져오기">가져오기</button>
           <button class="btn ghost sm" id="btnResetRule" title="이 시트의 단계·읽기 설정을 처음 상태로">초기화</button>
         </div>
       </div>
@@ -52,6 +50,20 @@
         <button class="btn ghost" id="btnTemplate" title="원하는 머리글만 적은 엑셀을 올리면 열을 자동으로 맞춤">템플릿으로 열 맞추기</button>
       </div>
       <div id="addMenu" class="add-menu" hidden></div>
+    </section>
+
+    <section class="panel" id="panelRules" hidden>
+      <div class="panel-h"><span class="num">4</span>규칙
+        <div class="panel-actions">
+          <button class="btn ghost sm" id="btnExport" title="저장된 규칙 목록 전체를 JSON 파일로">내보내기</button>
+          <button class="btn ghost sm" id="btnImport" title="내보낸 JSON 파일의 규칙을 목록에 추가">가져오기</button>
+        </div>
+      </div>
+      <div class="row">
+        <input type="text" id="ruleName" placeholder="규칙 이름 (예: 월간 매출 보고)" spellcheck="false">
+        <button class="btn primary fixed" id="btnSaveRule">규칙 저장</button>
+      </div>
+      <div id="ruleList" class="rule-list"></div>
     </section>
   </aside>
 

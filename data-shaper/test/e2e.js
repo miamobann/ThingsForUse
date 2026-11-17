@@ -88,13 +88,19 @@ const SHOT = process.env.SHOT_DIR || path.join(__dirname, 'shots');
     const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#btnDown')]);
     const p = `${SHOT}/out.${fmt}`; await dl.saveAs(p); console.log('내려받음', dl.suggestedFilename());
   }
-  // 규칙 저장 → 다시 불러오기
-  const [rd] = await Promise.all([page.waitForEvent('download'), page.click('#btnSaveRule')]);
-  await rd.saveAs(`${SHOT}/rule.json`);
-  await page.evaluate(() => { cur().steps = []; refresh(true); });
-  await page.setInputFiles('#ruleIn', file(`${SHOT}/rule.json`));
+  // 규칙: 이름 붙여 저장 → 내보내기 → 저장소 비우기 → 가져오기 → 목록에서 적용
+  await page.fill('#ruleName', '월간 매출');
+  await page.click('#btnSaveRule');
+  const [rd] = await Promise.all([page.waitForEvent('download'), page.click('#btnExport')]);
+  await rd.saveAs(`${SHOT}/rules.json`);
+  await page.evaluate(() => { localStorage.clear(); renderRules(); cur().steps = []; refresh(true); });
+  console.log('비운 뒤 목록', await page.locator('.rule-item').count());
+  await page.setInputFiles('#ruleIn', file(`${SHOT}/rules.json`));
   await page.waitForTimeout(200);
-  console.log('규칙 다시 적용 단계 수', await page.evaluate(() => cur().steps.length), '열', await page.evaluate(() => S.out.cols.join('|')));
+  console.log('가져온 뒤 목록', await page.locator('.rule-item').count());
+  await page.click('.rule-item .btn:has-text("적용")');
+  console.log('규칙 적용 단계 수', await page.evaluate(() => cur().steps.length), '열', await page.evaluate(() => S.out.cols.join('|')));
+  await page.screenshot({ path: `${SHOT}/3d-rules.png` });
 
   // 직원 시트: 날짜·앞자리 0·값 바꾸기·중복 제거
   await page.click('.chip:has-text("직원")');
@@ -108,13 +114,6 @@ const SHOT = process.env.SHOT_DIR || path.join(__dirname, 'shots');
   });
   console.log('직원', JSON.stringify(await page.evaluate(() => ({ read: cur().read, cols: S.out.cols, n: S.out.rows.length, r: S.out.rows.slice(0, 4), info: S.stepInfo.map((x) => x.error || x.warn) }))));
   await page.screenshot({ path: `${SHOT}/5-emp.png` });
-
-  // 자동 저장·자동 불러오기: 같은 파일 다시 열면 단계 복원
-  const before = await page.evaluate(() => S.sheets['매출'].steps.length);
-  await page.waitForTimeout(600);
-  await page.setInputFiles('#fileIn', file(`${SAMPLE}/가짜_매출_직원.xlsx`));
-  await page.waitForTimeout(400);
-  console.log('자동 불러오기', before, '→', await page.evaluate(() => cur().steps.length), await page.evaluate(() => Object.keys(JSON.parse(localStorage.getItem('data-shaper:rules') || '{}'))));
 
   // CP949 CSV
   await page.setInputFiles('#fileIn', file(`${SAMPLE}/가짜_직원_cp949.csv`));
