@@ -858,7 +858,6 @@ function stepBody(st, cols, idx) {
       out.push(h('div', { class: 'row' },
         h('button', { class: 'btn ghost sm sub-add fixed', onclick: C(() => st.conds.push({ col: cols[0] || '', op: 'eq', val: '' })) }, '＋ 조건'),
         st.conds.length > 1 ? select([['and', '모두 만족'], ['or', '하나라도 만족']], st.mode, (v) => { st.mode = v; changed(true); }) : h('span')));
-      out.push(h('div', { class: 'hint' }, '날짜는 2026-01-05 형식, 숫자는 쉼표 없이 입력'));
       return out;
     }
     case 'sort': {
@@ -889,7 +888,6 @@ function stepBody(st, cols, idx) {
         out.push(select([['above', '바로 위 값으로'], ['value', '정한 값으로']], st.fill, (v) => { st.fill = v; changed(true); }));
         if (st.fill === 'value') out.push(textInput(st, 'fillVal', '채울 값'));
       }
-      if (st.action === 'number') out.push(h('div', { class: 'hint' }, '쉼표·원·₩·공백 제거, (1,000)은 -1000, 15%는 0.15'));
       return out;
     }
     case 'merge':
@@ -912,7 +910,6 @@ function stepBody(st, cols, idx) {
         h('div', { class: 'row' }, select([['', '＋ 열 이름 넣기'], ...cols], '', (v) => {
           if (!v) return; st.expr = (st.expr ? st.expr.replace(/\s*$/, ' ') : '') + `[${v}]`; changed(true);
         })),
-        h('div', { class: 'hint' }, '+ − * / 괄호, ROUND(값, 자릿수), ABS(값). 빈 칸은 0으로 계산'),
       ];
     }
     case 'group': {
@@ -937,12 +934,11 @@ function stepBody(st, cols, idx) {
           select(fnOpts, st.fn, (v) => { st.fn = v; changed(true); })),
         h('label', { class: 'tgl' }, h('input', { type: 'checkbox', checked: st.totals, onchange: (e) => { st.totals = e.target.checked; changed(true); } }), h('span', null, '합계 행·열 넣기')),
         h('label', { class: 'tgl' }, h('input', { type: 'checkbox', checked: st.zero, onchange: (e) => { st.zero = e.target.checked; changed(true); } }), h('span', null, '해당 없는 칸은 0으로 (끄면 빈 칸)')),
-        h('div', { class: 'hint' }, '엑셀로 내려받으면 어떻게 만든 표인지 적은 "가이드" 시트가 같이 들어감'),
       ];
       return out;
     }
     case 'template': {
-      const out = [h('div', { class: 'hint' }, '왼쪽은 템플릿 머리글, 오른쪽은 연결할 열. 결과는 템플릿 순서대로 나감')];
+      const out = [];
       st.targets.forEach((x) => out.push(h('div', { class: 'map-item' },
         h('span', { class: 'tgt', title: x.name }, x.name), h('span', { class: 'arr' }, '←'),
         colSelect(cols, x.src || '', (v) => { x.src = v || null; x.auto = v ? 'manual' : 'none'; changed(true); }, '(빈 열)'),
@@ -974,8 +970,7 @@ function pivotGuide(st, idx) {
   return h('div', { class: 'pv-guide' },
     h('div', { class: 'pv-legend' },
       h('span', null, h('i', { class: 'pv-r' }), '① 행 기준'), h('span', null, h('i', { class: 'pv-c' }), `② 열 기준: ${st.col || '?'}`), h('span', null, h('i', { class: 'pv-v' }), `③ 값: ${valName}`)),
-    tbl,
-    h('div', { class: 'hint' }, `■ 한 칸 = 행(${rowName}) × 열(${st.col || '?'})에 해당하는 원본 행들의 ${valName}`));
+    tbl);
 }
 function pipelineInput(idx) {
   // idx번째 단계에 들어가는 표 (예시 값 뽑기용)

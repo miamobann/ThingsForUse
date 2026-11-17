@@ -65,11 +65,6 @@ button, input, select { font: inherit; color: inherit; }
   width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center;
   background: var(--accent); color: #fff; font-size: 15px;
 }
-.safe {
-  display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--ok);
-  padding: 4px 10px; border-radius: 999px; background: color-mix(in srgb, var(--ok) 10%, transparent);
-}
-.safe .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
 
 /* 본문 배치 */
 .layout { flex: 1; min-height: 0; display: flex; }
@@ -272,7 +267,6 @@ table.grid { border-collapse: separate; border-spacing: 0; font-size: 12.5px; }
 .drop-icon { font-size: 34px; color: var(--accent); }
 .drop-t { font-size: 16px; font-weight: 600; margin-top: 6px; }
 .drop-s { color: var(--text-2); margin-top: 4px; }
-.drop-note { margin-top: 18px; font-size: 12px; color: var(--ok); }
 
 .toast {
   position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: var(--text); color: var(--surface);
