@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- 외부 통신 전부 차단. 스크립트·스타일은 파일 안에 있는 것만 허용 -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'none'; font-src 'none'; form-action 'none'; base-uri 'none'">
+<meta name="referrer" content="no-referrer">
+<title>데이터 가공</title>
+<style>/*@@STYLE@@*/</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <span class="logo">▦</span>
+    <strong>데이터 가공</strong>
+  </div>
+  <div class="safe" title="이 파일은 외부 통신이 막혀 있어 올린 파일이 PC 밖으로 나가지 않음">
+    <span class="dot"></span>오프라인 전용 · 외부 통신 차단
+  </div>
+</header>
+
+<div class="layout">
+  <aside class="side" id="side">
+    <section class="panel" id="panelFile">
+      <div class="panel-h"><span class="num">1</span>파일</div>
+      <div id="fileInfo" class="file-info muted">파일을 올리면 여기에 표시</div>
+      <div id="sheetList" class="chips"></div>
+    </section>
+
+    <section class="panel" id="panelRead" hidden>
+      <div class="panel-h"><span class="num">2</span>원본 읽기</div>
+      <div class="grid2">
+        <label class="fld"><span>머리글 시작 줄</span><input type="number" id="hdrStart" min="1" step="1"></label>
+        <label class="fld"><span>머리글 줄 수</span>
+          <select id="hdrRows"><option value="1">1줄</option><option value="2">2줄</option><option value="3">3줄</option></select>
+        </label>
+      </div>
+      <label class="tgl"><input type="checkbox" id="fillMerges"><span>병합 셀 값을 모든 칸에 채우기</span></label>
+      <label class="tgl"><input type="checkbox" id="dropSub"><span>소계·합계 줄 빼기</span></label>
+      <div id="readInfo" class="hint"></div>
+    </section>
+
+    <section class="panel" id="panelSteps" hidden>
+      <div class="panel-h"><span class="num">3</span>가공 단계
+        <div class="panel-actions">
+          <button class="btn ghost sm" id="btnSaveRule" title="지금 단계들을 규칙 파일(.json)로 저장">규칙 저장</button>
+          <button class="btn ghost sm" id="btnLoadRule" title="저장해 둔 규칙 파일 불러오기">불러오기</button>
+        </div>
+      </div>
+      <div id="steps" class="steps"></div>
+      <div class="add-row">
+        <button class="btn" id="btnAdd">＋ 단계 추가</button>
+        <button class="btn ghost" id="btnTemplate" title="원하는 머리글만 적은 엑셀을 올리면 열을 자동으로 맞춤">템플릿으로 열 맞추기</button>
+      </div>
+      <div id="addMenu" class="add-menu" hidden></div>
+    </section>
+  </aside>
+
+  <main class="main">
+    <div class="toolbar" id="toolbar" hidden>
+      <div class="tabs">
+        <button class="tab" data-view="raw">원본</button>
+        <button class="tab" data-view="result">결과</button>
+      </div>
+      <div id="shape" class="shape"></div>
+      <div class="spacer"></div>
+      <div class="export">
+        <input type="text" id="outName" class="out-name" spellcheck="false">
+        <select id="outFmt"><option value="xlsx">엑셀 (.xlsx)</option><option value="csv">CSV (.csv)</option></select>
+        <button class="btn primary" id="btnDown">내려받기</button>
+      </div>
+    </div>
+    <div id="legend" class="legend" hidden></div>
+    <div class="view" id="view" hidden></div>
+    <div class="drop" id="drop">
+      <div class="drop-box">
+        <div class="drop-icon">⇪</div>
+        <div class="drop-t">엑셀이나 CSV 파일을 여기로 끌어오기</div>
+        <div class="drop-s">또는 <button class="link" id="btnPick">파일 고르기</button> · xlsx, xls, csv</div>
+        <div class="drop-note">파일은 이 브라우저 안에서만 읽음. 어디에도 전송하지 않음.</div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<input type="file" id="fileIn" accept=".xlsx,.xlsm,.xls,.csv,.txt" hidden>
+<input type="file" id="tplIn" accept=".xlsx,.xlsm,.xls,.csv" hidden>
+<input type="file" id="ruleIn" accept=".json,application/json" hidden>
+<div id="toast" class="toast" hidden></div>
+
+<script>/*@@XLSX@@*/</script>
+<script>/*@@APP@@*/</script>
+</body>
+</html>
