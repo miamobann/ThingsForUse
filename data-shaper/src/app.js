@@ -303,7 +303,7 @@ function buildBase(sh) {
     rowInfo.set(r, { reason, dropped });
     if (!dropped) rows.push(row);
   }
-  return { cols, rows, rowInfo, hs, hn, flagged: [...rowInfo.values()].filter((x) => x.reason).length };
+  return { cols, rows, rowInfo, hs, hn, src: keepCols, flagged: [...rowInfo.values()].filter((x) => x.reason).length };
 }
 
 // ───────────────────────── 가공 단계 ─────────────────────────
@@ -445,7 +445,7 @@ const STEP_DEFS = {
       const names = [];
       items.forEach((x) => names.push(uniqName(names, (x.name || x.src).trim() || x.src)));
       const missing = st.items.filter((x) => x.keep && !t.cols.includes(x.src)).map((x) => x.src);
-      return { cols: names, rows: t.rows.map((r) => keepKind(r, idx.map((i) => r[i]))), warn: missing.length ? `원본에 없는 열: ${missing.join(', ')}` : null };
+      return { cols: names, meta: idx.map((i) => t.meta[i]), rows: t.rows.map((r) => keepKind(r, idx.map((i) => r[i]))), warn: missing.length ? `원본에 없는 열: ${missing.join(', ')}` : null };
     },
     summary: (st) => { const k = st.items.filter((x) => x.keep); const rn = k.filter((x) => x.name && x.name !== x.src).length; return `${k.length}개 열${rn ? ` · 이름 ${rn}개 변경` : ''}`; },
   },
@@ -620,7 +620,9 @@ const STEP_DEFS = {
         for (const a of ags) out.push(aggregate(g.rows, a.i, a.fn));
         rows.push(out);
       }
-      return { cols: names, rows };
+      const keepFmt = (fn) => ['sum', 'avg', 'min', 'max'].includes(fn);
+      const meta = [...bi.map((i) => t.meta[i]), ...ags.map((a) => (a.i >= 0 && keepFmt(a.fn) ? { c: t.meta[a.i].c, tpl: null, valueOnly: true } : { c: null, tpl: null }))];
+      return { cols: names, rows, meta };
     },
     summary: (st) => `${st.by.length ? st.by.join(', ') + '별' : '전체'} · ${st.aggs.map((a) => a.fn === 'rows' ? '행 수' : `${a.col || '?'} ${fnLabel(a.fn)}`).join(', ')}`,
   },
@@ -702,7 +704,9 @@ const STEP_DEFS = {
         tot.push(aggregate(t.rows, vi, st.fn));
         rows.push(tot);
       }
-      return { cols: names, rows, warn };
+      const vm = vi >= 0 && ['sum', 'avg', 'min', 'max'].includes(st.fn) ? { c: t.meta[vi].c, tpl: null, valueOnly: true } : { c: null, tpl: null };
+      const meta = [...ri.map((i) => t.meta[i]), ...keys.map(() => vm), ...(st.totals ? [vm] : [])];
+      return { cols: names, rows, warn, meta };
     },
     summary: (st) => `행 ${st.rows.join(', ') || '없음'} · 열 ${st.col || '?'} · ${st.fn === 'rows' ? '행 수' : `${st.val || '?'} ${fnLabel(st.fn)}`}`,
   },
@@ -711,11 +715,12 @@ const STEP_DEFS = {
     init: () => ({ file: '', targets: [] }),
     apply(t, st) {
       const ix = st.targets.map((x) => (x.src && t.cols.includes(x.src) ? t.cols.indexOf(x.src) : -1));
+      const meta = st.targets.map((x, k) => ({ c: ix[k] >= 0 ? t.meta[ix[k]].c : null, tpl: (st.styles && st.styles[k]) || null }));
       const lost = st.targets.filter((x) => x.src && !t.cols.includes(x.src)).map((x) => x.src);
       const empty = st.targets.filter((x, k) => ix[k] < 0).length;
       const names = []; st.targets.forEach((x) => names.push(uniqName(names, x.name)));
       const warn = [lost.length ? `없는 열: ${lost.join(', ')}` : '', empty ? `빈 열로 나가는 항목 ${empty}개` : ''].filter(Boolean).join(' · ');
-      return { cols: names, rows: t.rows.map((r) => keepKind(r, ix.map((i) => (i < 0 ? null : r[i])))), warn: warn || null };
+      return { cols: names, meta, rows: t.rows.map((r) => keepKind(r, ix.map((i) => (i < 0 ? null : r[i])))), warn: warn || null };
     },
     summary: (st) => `${st.file || '템플릿'} · ${st.targets.length}개 열 · 연결 ${st.targets.filter((x) => x.src).length}개`,
   },
@@ -729,11 +734,18 @@ function reconcileColumns(st, cols) {
   for (const c of cols) if (!have.has(c)) st.items.push({ src: c, name: c, keep: true });
 }
 
+// 열 메타: { c: 원본 열 번호 또는 null, tpl: 템플릿 서식 또는 null }
+// 단계가 meta를 안 돌려주면 같은 이름 열의 메타를 이어받음
+function carryMeta(t, r) {
+  if (r.meta) return r.meta;
+  if (r.cols === t.cols) return t.meta;
+  return r.cols.map((n) => { const i = t.cols.indexOf(n); return i >= 0 ? t.meta[i] : { c: null, tpl: null }; });
+}
 function runPipeline() {
   const sh = cur();
   if (!sh) return;
   S.base = buildBase(sh);
-  let t = { cols: S.base.cols, rows: S.base.rows };
+  let t = { cols: S.base.cols, rows: S.base.rows, meta: S.base.src.map((c) => ({ c, tpl: null })) };
   S.stepInfo = [];
   for (const st of sh.steps) {
     const info = { inCols: t.cols.slice(), error: null, warn: null };
@@ -741,7 +753,7 @@ function runPipeline() {
       try {
         const r = STEP_DEFS[st.type].apply(t, st);
         info.warn = r.warn || null;
-        t = { cols: r.cols, rows: r.rows };
+        t = { cols: r.cols, rows: r.rows, meta: carryMeta(t, r) };
       } catch (e) { info.error = e.message || String(e); }
     }
     info.rows = t.rows.length; info.cols = t.cols.length;
@@ -776,24 +788,93 @@ function autoMatch(targets, cols) {
   }
   return res;
 }
+// ───────────────────────── 셀 서식 ─────────────────────────
+// 값은 SheetJS로, 서식(글꼴·채우기·테두리·맞춤·숫자 형식·열 너비)은 ExcelJS로 읽음. .xls는 숫자 형식만
+async function loadStyles(file) {
+  if (!/\.(xlsx|xlsm)$/i.test(file.name) || typeof ExcelJS === 'undefined') return null;
+  try {
+    const x = new ExcelJS.Workbook();
+    await x.xlsx.load(await file.arrayBuffer());
+    return x;
+  } catch (e) { console.warn('서식 읽기 실패', e); return null; }
+}
+function cleanStyle(st) {
+  if (!st) return null;
+  const out = {};
+  for (const k of ['font', 'fill', 'border', 'alignment', 'numFmt']) {
+    const v = st[k];
+    if (v == null) continue;
+    if (typeof v === 'object' && !Object.keys(v).length) continue;
+    if (k === 'fill' && v.type === 'pattern' && (!v.pattern || v.pattern === 'none')) continue;
+    if (k === 'numFmt' && v === 'General') continue;
+    out[k] = JSON.parse(JSON.stringify(v));
+  }
+  return Object.keys(out).length ? out : null;
+}
+function cellStyle(xws, sws, r, c) {
+  if (r < 0 || c == null) return null;
+  if (xws) {
+    const cell = xws.findCell(r + 1, c + 1);
+    if (cell) return cleanStyle(cell.style);
+    const row = xws.findRow(r + 1);
+    if (row && row.style) return cleanStyle(row.style);
+    return null;
+  }
+  const sc = sws && sws[XLSX.utils.encode_cell({ r, c })];
+  return sc && sc.z && sc.z !== 'General' ? { numFmt: sc.z } : null;
+}
+function colWidth(xws, c) {
+  if (!xws || c == null) return null;
+  const col = xws.getColumn(c + 1);
+  return col && col.width ? col.width : null;
+}
+// 원본 열 c의 머리글·데이터 서식 (데이터는 소계로 표시된 줄을 빼고 값이 있는 첫 칸)
+function sourceColStyle(c) {
+  const sh = cur(), b = S.base;
+  if (c == null || !sh) return { head: null, data: null, width: null };
+  sh._styleCache = sh._styleCache || {};
+  const key = `${b.hs}:${b.hn}:${c}`;
+  if (sh._styleCache[key]) return sh._styleCache[key];
+  const sws = S.wb.Sheets[S.sheet];
+  const head = cellStyle(sh.xws, sws, b.hs + b.hn - 1, c);
+  let data = null;
+  for (const [r, info] of b.rowInfo) {
+    if (info.reason) continue;
+    if (isEmpty(sh.grid[r][c])) continue;
+    data = cellStyle(sh.xws, sws, r, c); break;
+  }
+  return (sh._styleCache[key] = { head, data, width: colWidth(sh.xws, c) });
+}
+
 async function loadTemplate(file) {
   const { wb, csv } = await readWorkbook(file);
-  let names = null;
+  const xwb = csv ? null : await loadStyles(file);
+  let names = null, styles = null;
   for (const sn of wb.SheetNames) {
     const { grid, merges } = sheetToGrid(wb.Sheets[sn]);
     if (!grid.length) continue;
     const d = detectHeader(grid, merges);
-    // 머리글만 있는 파일이면 감지가 첫 줄을 고르므로, 머리글 줄 수는 남은 줄 기준으로 다시 판단
     const tmp = { grid, merges, read: { headerStart: d.headerStart, headerRows: d.headerRows, fillMerges: false, dropSubtotals: false }, toggled: new Set() };
-    names = buildBase(tmp).cols.filter((n) => !/^열\d+$/.test(n));
-    if (names.length) break;
+    const b = buildBase(tmp);
+    const keep = b.cols.map((n, k) => [n, b.src[k]]).filter(([n]) => !/^열\d+$/.test(n));
+    names = keep.map((x) => x[0]);
+    if (!names.length) continue;
+    // 템플릿 서식: 머리글 마지막 줄 칸, 그 바로 아래 칸(데이터 서식), 열 너비
+    const xws = xwb && xwb.getWorksheet(sn);
+    const hr = b.hs + b.hn - 1;
+    styles = keep.map(([, c]) => ({
+      head: cellStyle(xws, wb.Sheets[sn], hr, c),
+      data: cellStyle(xws, wb.Sheets[sn], hr + 1, c),
+      width: colWidth(xws, c),
+    }));
+    break;
   }
   if (!names || !names.length) throw new Error('템플릿에서 머리글을 찾지 못함');
   const sh = cur();
   // 템플릿 단계는 항상 맨 끝. 기존 템플릿 단계가 있으면 교체
   sh.steps = sh.steps.filter((s) => s.type !== 'template');
   runPipeline();
-  const st = { type: 'template', on: true, open: true, file: file.name, targets: autoMatch(names, S.out.cols) };
+  const st = { type: 'template', on: true, open: true, file: file.name, targets: autoMatch(names, S.out.cols), styles };
   sh.steps.push(st);
   const hit = st.targets.filter((x) => x.src).length;
   toast(hit === names.length ? `템플릿 열 ${names.length}개 모두 자동 연결. 추정 표시는 한 번 확인 필요` : `템플릿 열 ${names.length}개 중 ${hit}개 자동 연결. 나머지는 직접 고르면 됨`);
@@ -1032,10 +1113,10 @@ function pivotGuide(st, idx) {
 function pipelineInput(idx) {
   // idx번째 단계에 들어가는 표 (예시 값 뽑기용)
   const sh = cur(); if (!sh || !S.base) return null;
-  let t = { cols: S.base.cols, rows: S.base.rows };
+  let t = { cols: S.base.cols, rows: S.base.rows, meta: S.base.src.map((c) => ({ c, tpl: null })) };
   for (let i = 0; i < idx; i++) {
     const st = sh.steps[i]; if (st.on === false) continue;
-    try { const r = STEP_DEFS[st.type].apply(t, st); t = { cols: r.cols, rows: r.rows }; } catch (e) { /* 오류 단계는 건너뜀 */ }
+    try { const r = STEP_DEFS[st.type].apply(t, st); t = { cols: r.cols, rows: r.rows, meta: carryMeta(t, r) }; } catch (e) { /* 오류 단계는 건너뜀 */ }
   }
   return t;
 }
@@ -1312,53 +1393,74 @@ function download(blob, name) {
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }
 function safeName(s) { return s.replace(/[\\/:*?"<>|]/g, '_').trim() || '결과'; }
-// 엑셀이 접기 버튼 영역을 바로 그리도록 sheetFormatPr outlineLevelRow 추가 (라이브러리가 안 넣어줌)
-function addOutlineLevel(data) {
-  try {
-    const zip = XLSX.CFB.read(new Uint8Array(data), { type: 'array' });
-    const ent = XLSX.CFB.find(zip, '/xl/worksheets/sheet1.xml');
-    if (!ent) return data;
-    let xml = new TextDecoder().decode(ent.content);
-    if (xml.includes('outlineLevelRow')) return data;
-    // 스키마 순서: sheetViews → sheetFormatPr → cols → sheetData
-    const at = xml.indexOf('<cols') >= 0 ? '<cols' : '<sheetData';
-    xml = xml.replace(at, '<sheetFormatPr defaultRowHeight="15" outlineLevelRow="1"/>' + at);
-    ent.content = new TextEncoder().encode(xml); ent.size = ent.content.length;
-    return XLSX.CFB.write(zip, { fileType: 'zip', type: 'array', compression: true });
-  } catch (e) { console.error(e); return data; }
-}
-function exportXlsx(t, name) {
-  const ws = {};
-  const all = [t.cols, ...t.rows];
-  const widths = t.cols.map((c) => Math.min(40, Math.max(6, str(c).length * 2)));
-  all.forEach((row, r) => row.forEach((v, c) => {
-    if (v == null) return;
-    const ref = XLSX.utils.encode_cell({ r, c });
-    if (typeof v === 'number') ws[ref] = { t: 'n', v };
-    else if (typeof v === 'boolean') ws[ref] = { t: 'b', v };
-    else if (v instanceof Date) ws[ref] = { t: 'n', v: serial(v), z: hasTime(v) ? 'yyyy-mm-dd hh:mm' : 'yyyy-mm-dd' };
-    else ws[ref] = { t: 's', v: String(v) };
-    if (r < 300) widths[c] = Math.min(50, Math.max(widths[c], [...str(v)].reduce((a, ch) => a + (ch.charCodeAt(0) > 255 ? 2 : 1), 0) + 2));
-  }));
-  ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: Math.max(0, all.length - 1), c: Math.max(0, t.cols.length - 1) } });
-  ws['!cols'] = widths.map((w) => ({ wch: w }));
-  if (t.rows.some((r) => r.kind)) {
-    // 부분합: 데이터 행은 수준 1로 묶어 엑셀 왼쪽 +/− 로 접기. 소계·총합계 줄은 바깥
-    ws['!rows'] = [{}, ...t.rows.map((r) => (r.kind ? {} : { level: 1 }))];
-    ws['!outline'] = { above: false };
-  } else ws['!autofilter'] = { ref: ws['!ref'] };
-  const wb = XLSX.utils.book_new();
+const DEFAULT_HEAD = {
+  font: { bold: true },
+  fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F3F6' } },
+  border: { bottom: { style: 'thin', color: { argb: 'FFB8BEC8' } } },
+};
+const isDateFmt = (f) => !!f && XLSX.SSF.is_date(f);
+// ExcelJS는 Date를 UTC로 저장하므로 현지 시각 그대로 보이게 변환
+const toUtcDate = (d) => new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), d.getMinutes(), d.getSeconds()));
+function textWidth(v) { return [...str(v)].reduce((a, ch) => a + (ch.charCodeAt(0) > 255 ? 2 : 1), 0); }
+
+async function exportXlsx(t, name) {
+  const outline = t.rows.some((r) => r.kind);
+  const wb = new ExcelJS.Workbook();
   const sheetName = safeName(S.sheet || '결과').replace(/[\[\]]/g, '_').slice(0, 31);
-  XLSX.utils.book_append_sheet(wb, ws, sheetName === '가이드' ? '결과' : sheetName);
+  const ws = wb.addWorksheet(sheetName === '가이드' ? '결과' : sheetName, {
+    views: [{ state: 'frozen', ySplit: 1 }],
+    properties: outline ? { outlineLevelRow: 1, outlineProperties: { summaryBelow: true } } : {},
+  });
+  // 열별 서식: 템플릿 > 원본 열 > 기본
+  const colSt = t.cols.map((_, j) => {
+    const m = t.meta[j] || { c: null, tpl: null };
+    const src = sourceColStyle(m.c);
+    const tpl = m.tpl || {};
+    let data = tpl.data || src.data || null;
+    // 집계 열은 원본 숫자 형식만 이어받음 (글꼴·색은 기본)
+    if (m.valueOnly && data) data = data.numFmt ? { numFmt: data.numFmt } : null;
+    // 새로 만든 숫자 열(계산·집계)은 천 단위 쉼표
+    if (m.c == null && !(data && data.numFmt)) {
+      const vs = t.rows.filter((r) => !isEmpty(r[j])).map((r) => r[j]);
+      if (vs.length && vs.every((v) => typeof v === 'number')) data = { ...(data || {}), numFmt: vs.every(Number.isInteger) ? '#,##0' : '#,##0.00' };
+    }
+    return { head: tpl.head || (m.valueOnly ? null : src.head), data, width: tpl.width || src.width || null };
+  });
+  const anyHead = colSt.find((x) => x.head);
+  const fallbackHead = anyHead ? anyHead.head : DEFAULT_HEAD;
+  const widths = t.cols.map((c, j) => colSt[j].width || Math.min(40, Math.max(6, textWidth(c) + 2)));
+
+  const hdr = ws.addRow(t.cols);
+  hdr.eachCell((cell, k) => { cell.style = colSt[k - 1].head || fallbackHead; });
+
+  const boldOf = colSt.map((x) => ({ ...(x.data || {}), font: { ...((x.data && x.data.font) || {}), bold: true } }));
+  t.rows.forEach((r, ri) => {
+    const row = ws.addRow(r.map((v) => (v instanceof Date ? toUtcDate(v) : v)));
+    if (outline && !r.kind) row.outlineLevel = 1;
+    for (let j = 0; j < r.length; j++) {
+      const v = r[j];
+      const base = r.kind ? boldOf[j] : colSt[j].data;
+      const cell = row.getCell(j + 1);
+      if (base) cell.style = base;
+      // 날짜인데 날짜 형식이 없으면 기본 날짜 형식, 숫자 아닌 값에는 숫자 형식 안 씀
+      if (v instanceof Date && !isDateFmt(base && base.numFmt)) cell.numFmt = hasTime(v) ? 'yyyy-mm-dd hh:mm' : 'yyyy-mm-dd';
+      else if (base && base.numFmt && typeof v !== 'number' && !(v instanceof Date)) cell.numFmt = 'General';
+      if (ri < 300 && !colSt[j].width) widths[j] = Math.min(50, Math.max(widths[j], textWidth(v) + 2));
+    }
+  });
+  widths.forEach((w, j) => { ws.getColumn(j + 1).width = w; });
+  if (!outline && t.cols.length) ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: t.cols.length } };
+
   const g = guideRows();
   if (g) {
-    const gs = XLSX.utils.aoa_to_sheet(g);
-    gs['!cols'] = [{ wch: 14 }, { wch: 70 }];
-    XLSX.utils.book_append_sheet(wb, gs, '가이드');
+    const gs = wb.addWorksheet('가이드');
+    g.forEach((row) => gs.addRow(row));
+    gs.getColumn(1).width = 14; gs.getColumn(2).width = 70;
+    gs.getCell('A1').font = { bold: true, size: 13 };
+    ['A8', 'A16'].forEach((a) => { gs.getCell(a).font = { bold: true }; });
   }
-  let data = XLSX.write(wb, { bookType: 'xlsx', type: 'array', compression: true });
-  if (ws['!rows']) data = addOutlineLevel(data);
-  download(new Blob([data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `${name}.xlsx`);
+  const buf = await wb.xlsx.writeBuffer();
+  download(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `${name}.xlsx`);
 }
 function exportCsv(t, name) {
   const q = (v) => { const s = str(v); return /[",\r\n]/.test(s) || /^\s|\s$/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
@@ -1366,12 +1468,14 @@ function exportCsv(t, name) {
   // 엑셀에서 한글 안 깨지게 BOM 붙임
   download(new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' }), `${name}.csv`);
 }
-function doDownload() {
+async function doDownload() {
   if (!S.out) return;
   runPipeline();
   const name = safeName($('outName').value);
   const csv = $('outFmt').value === 'csv';
-  if (csv) exportCsv(S.out, name); else exportXlsx(S.out, name);
+  try {
+    if (csv) exportCsv(S.out, name); else await exportXlsx(S.out, name);
+  } catch (e) { console.error(e); toast(`내려받기 실패: ${e.message || e}`, true); return; }
   const hasGuide = !!guideRows();
   toast(`${S.out.rows.length.toLocaleString()}행 내려받기 완료${hasGuide ? (csv ? ' (CSV는 시트가 하나라 가이드 시트는 빠짐. 엑셀로 받으면 포함)' : ' · 가이드 시트 포함') : ''}`);
 }
@@ -1517,12 +1621,13 @@ async function openFile(file) {
   if (!file) return;
   try {
     const { wb, csv } = await readWorkbook(file);
-    S.fileName = file.name; S.wb = wb; S.isCsv = csv; S.sheets = {};
+    const xwb = csv ? null : await loadStyles(file);
+    S.fileName = file.name; S.wb = wb; S.isCsv = csv; S.sheets = {}; S.hasStyles = !!xwb;
     let first = null;
     for (const sn of wb.SheetNames) {
       const { grid, merges } = sheetToGrid(wb.Sheets[sn]);
       const d = detectHeader(grid, merges);
-      S.sheets[sn] = { grid, merges, toggled: new Set(), steps: [], read: { headerStart: d.headerStart, headerRows: d.headerRows, fillMerges: true, dropSubtotals: true } };
+      S.sheets[sn] = { grid, merges, xws: xwb ? xwb.getWorksheet(sn) : null, toggled: new Set(), steps: [], read: { headerStart: d.headerStart, headerRows: d.headerRows, fillMerges: true, dropSubtotals: true } };
       if (!first && grid.length) first = sn;
     }
     S.sheet = first || wb.SheetNames[0];

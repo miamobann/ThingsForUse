@@ -15,7 +15,8 @@ def main():
     css = (ROOT / 'src/style.css').read_text(encoding='utf-8')
     app = (ROOT / 'src/app.js').read_text(encoding='utf-8')
     xlsx = (ROOT / 'vendor/xlsx.full.min.js').read_text(encoding='utf-8')
-    for key, val in (('/*@@STYLE@@*/', css), ('/*@@XLSX@@*/', inline_js(xlsx)), ('/*@@APP@@*/', inline_js(app))):
+    exceljs = (ROOT / 'vendor/exceljs.bare.min.js').read_text(encoding='utf-8')
+    for key, val in (('/*@@STYLE@@*/', css), ('/*@@XLSX@@*/', inline_js(xlsx)), ('/*@@EXCELJS@@*/', inline_js(exceljs)), ('/*@@APP@@*/', inline_js(app))):
         assert html.count(key) == 1, key
         html = html.replace(key, val)
     out = ROOT / 'data-shaper.html'
