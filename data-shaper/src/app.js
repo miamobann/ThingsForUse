@@ -1263,12 +1263,17 @@ function renderFile() {
   fi.append(h('span', { class: 'fname' }, S.fileName), h('button', { class: 'link re', onclick: () => $('fileIn').click() }, '다른 파일'),
     h('button', { class: 'link re', title: '파일을 닫고 브라우저에 저장된 작업도 지움', onclick: closeFile }, '닫기'));
   const sl = $('sheetList'); sl.textContent = '';
-  if (S.wb.SheetNames.length > 1 || !S.isCsv) {
-    for (const sn of S.wb.SheetNames) {
-      const n = S.sheets[sn].grid.length;
-      sl.append(h('button', { class: 'chip' + (sn === S.sheet ? ' on' : ''), onclick: () => selectSheet(sn) }, sn, h('span', { class: 'cnt' }, n ? `${n.toLocaleString()}줄` : '빈 시트')));
-    }
-  }
+  if (S.isCsv) return;
+  // 시트가 많아도 한 줄로: 드롭다운 + 이전/다음
+  const names = S.wb.SheetNames;
+  const label = (sn) => { const n = S.sheets[sn].grid.length; return `${sn}  ·  ${n ? `${n.toLocaleString()}줄` : '빈 시트'}`; };
+  const i = names.indexOf(S.sheet);
+  sl.append(h('div', { class: 'sheet-pick' },
+    h('span', { class: 'sheet-l' }, '시트'),
+    select(names.map((sn) => [sn, label(sn)]), S.sheet, (v) => selectSheet(v), { id: 'sheetSel' }),
+    h('span', { class: 'sheet-n muted' }, `${i + 1}/${names.length}`),
+    h('button', { class: 'icon-btn', title: '이전 시트', disabled: i <= 0, onclick: () => selectSheet(names[i - 1]) }, '‹'),
+    h('button', { class: 'icon-btn', title: '다음 시트', disabled: i >= names.length - 1, onclick: () => selectSheet(names[i + 1]) }, '›')));
 }
 function renderRead() {
   const sh = cur(); if (!sh) return;

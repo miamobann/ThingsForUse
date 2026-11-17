@@ -103,7 +103,7 @@ const SHOT = process.env.SHOT_DIR || path.join(__dirname, 'shots');
   await page.screenshot({ path: `${SHOT}/3d-rules.png` });
 
   // 직원 시트: 날짜·앞자리 0·값 바꾸기·중복 제거
-  await page.click('.chip:has-text("직원")');
+  await page.selectOption('#sheetSel', '직원');
   await page.evaluate(() => {
     const sh = cur();
     sh.steps.push({ type: 'values', on: true, open: false, cols: ['이름'], action: 'trim', fmt: 'YYYY-MM-DD', find: '', to: '', whole: true, fill: 'above', fillVal: '' });

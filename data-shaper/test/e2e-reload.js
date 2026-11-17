@@ -17,7 +17,7 @@ const file = (p) => ({ name: path.basename(p), mimeType: 'application/octet-stre
   await page.goto(HTML);
   await page.setInputFiles('#fileIn', file(`${SAMPLE}/가짜_매출_직원.xlsx`));
   await page.waitForSelector('table.grid');
-  await page.click('.chip:has-text("직원")');
+  await page.selectOption('#sheetSel', '직원');
   await page.evaluate(() => {
     cur().steps.push({ type: 'sort', on: true, open: false, keys: [{ col: '기본급', dir: 'desc' }] });
     cur().fmt.cols['이름'] = { bold: true };
