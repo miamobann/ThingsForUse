@@ -280,6 +280,33 @@ table.grid { border-collapse: separate; border-spacing: 0; font-size: 12.5px; }
 .more { padding: 12px 16px; color: var(--text-3); font-size: 12px; }
 .empty-res { padding: 40px; text-align: center; color: var(--text-3); }
 
+/* 서식 미리보기: 엑셀처럼 흰 바탕 */
+.fmt-tgl { font-size: 12.5px; color: var(--text-2); padding: 0; }
+.grid th.fh { cursor: pointer; }
+.grid th.fh:hover { box-shadow: inset 0 -2px 0 var(--accent); }
+.grid.xl td:not(.rn), .grid.xl th:not(.rn) { background: #fff; color: #1f2328; border-color: #e1e4e8; }
+.grid.xl th.fh .ty { color: inherit; opacity: .6; }
+.grid.xl tbody tr:hover td:not(.rn) { filter: brightness(.97); }
+.grid.xl tr.k-sub td:not(.rn), .grid.xl tr.k-grand td:not(.rn) { font-weight: 700; }
+
+/* 서식 편집 창 */
+.fmt-pop {
+  position: fixed; z-index: 40; width: 330px; background: var(--surface); border: 1px solid var(--line-2); border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .18); padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; max-height: calc(100vh - 16px); overflow-y: auto;
+}
+.fp-h { display: flex; align-items: center; gap: 2px; font-size: 13.5px; }
+.fp-h2 { font-weight: 600; font-size: 12.5px; color: var(--text-2); }
+.fp-row { display: flex; align-items: center; gap: 6px; }
+.fp-row > select, .fp-row > input[type=number] { flex: 1; min-width: 0; height: 30px; }
+.fp-l { width: 62px; flex: none; font-size: 12px; color: var(--text-2); }
+.fp-u { font-size: 11.5px; }
+.fp-row input[type=color] { width: 40px; height: 28px; padding: 2px; border: 1px solid var(--line-2); border-radius: 6px; background: var(--surface); cursor: pointer; }
+.fp-sep { border-top: 1px solid var(--line); margin: 2px 0; }
+.fmt-pop .link { align-self: flex-start; font-size: 12px; }
+.seg { display: flex; background: var(--surface-2); border-radius: 7px; padding: 2px; flex: 1; }
+.seg-b { flex: 1; border: 0; background: transparent; border-radius: 5px; padding: 3px 6px; cursor: pointer; font-size: 12px; color: var(--text-2); }
+.seg-b.on { background: var(--surface); color: var(--text); box-shadow: var(--shadow); font-weight: 600; }
+
 /* 파일 놓기 */
 .drop { flex: 1; display: grid; place-items: center; padding: 24px; }
 .drop-box {

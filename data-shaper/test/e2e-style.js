@@ -41,6 +41,27 @@ const file = (p) => ({ name: path.basename(p), mimeType: 'application/octet-stre
   // 4) 집계: 합계 열은 숫자 형식만 이어받음
   await page.evaluate(() => { const sh = cur(); sh.steps.pop(); sh.steps.push({ type: 'group', on: true, open: false, by: ['업체명'], aggs: [{ col: '금액', fn: 'sum', name: '' }, { col: '', fn: 'rows', name: '건수' }] }); refresh(true); });
   await save('style-4.xlsx');
+  // 5) 화면에서 서식 편집: 금액 열 머리글 눌러 형식·굵게·배경색, 머리글 줄 배경색
+  await page.evaluate(() => { const sh = cur(); sh.steps.pop(); refresh(true); });
+  await page.click('th.fh:has-text("금액")');
+  await page.waitForSelector('#fmtPop');
+  await page.selectOption('#fmtPop select', '#,##0');
+  await page.click('#fmtPop .seg-b:has-text("굵게")');
+  await page.evaluate(() => { const i = document.querySelectorAll('#fmtPop input[type=color]'); i[1].value = '#ffeeaa'; i[1].dispatchEvent(new Event('input', { bubbles: true })); i[2].value = '#203040'; i[2].dispatchEvent(new Event('input', { bubbles: true })); });
+  await page.fill('#fmtPop input[type=number]', '20');
+  await page.waitForTimeout(400);
+  await page.screenshot({ path: `${SHOT}/8-fmt-edit.png` });
+  console.log('편집 상태', JSON.stringify(await page.evaluate(() => cur().fmt)));
+  console.log('미리보기 금액 칸', await page.evaluate(() => { const th = [...document.querySelectorAll('th.fh')].find((x) => x.textContent.startsWith('금액')); const j = +th.dataset.col; const td = document.querySelector(`tbody tr td:nth-child(${j + 2})`); return [td.textContent, td.getAttribute('style'), th.getAttribute('style')]; }));
+  await page.keyboard.press('Escape');
+  await save('style-5.xlsx');
+  // 규칙에 서식 저장 → 비우고 다시 적용
+  await page.fill('#ruleName', '서식 테스트');
+  await page.click('#btnSaveRule');
+  await page.click('#btnResetRule');
+  await page.click('.rule-item:has-text("서식 테스트") .btn:has-text("적용")');
+  console.log('규칙 적용 후 서식', JSON.stringify(await page.evaluate(() => Object.keys(cur().fmt.cols))));
+
   console.log('페이지 오류', errors.length ? errors : '없음');
   console.log('외부 네트워크 요청', net.length ? net : '0건');
   await browser.close();

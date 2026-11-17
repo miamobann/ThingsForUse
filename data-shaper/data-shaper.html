@@ -289,6 +289,33 @@ table.grid { border-collapse: separate; border-spacing: 0; font-size: 12.5px; }
 .more { padding: 12px 16px; color: var(--text-3); font-size: 12px; }
 .empty-res { padding: 40px; text-align: center; color: var(--text-3); }
 
+/* 서식 미리보기: 엑셀처럼 흰 바탕 */
+.fmt-tgl { font-size: 12.5px; color: var(--text-2); padding: 0; }
+.grid th.fh { cursor: pointer; }
+.grid th.fh:hover { box-shadow: inset 0 -2px 0 var(--accent); }
+.grid.xl td:not(.rn), .grid.xl th:not(.rn) { background: #fff; color: #1f2328; border-color: #e1e4e8; }
+.grid.xl th.fh .ty { color: inherit; opacity: .6; }
+.grid.xl tbody tr:hover td:not(.rn) { filter: brightness(.97); }
+.grid.xl tr.k-sub td:not(.rn), .grid.xl tr.k-grand td:not(.rn) { font-weight: 700; }
+
+/* 서식 편집 창 */
+.fmt-pop {
+  position: fixed; z-index: 40; width: 330px; background: var(--surface); border: 1px solid var(--line-2); border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .18); padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; max-height: calc(100vh - 16px); overflow-y: auto;
+}
+.fp-h { display: flex; align-items: center; gap: 2px; font-size: 13.5px; }
+.fp-h2 { font-weight: 600; font-size: 12.5px; color: var(--text-2); }
+.fp-row { display: flex; align-items: center; gap: 6px; }
+.fp-row > select, .fp-row > input[type=number] { flex: 1; min-width: 0; height: 30px; }
+.fp-l { width: 62px; flex: none; font-size: 12px; color: var(--text-2); }
+.fp-u { font-size: 11.5px; }
+.fp-row input[type=color] { width: 40px; height: 28px; padding: 2px; border: 1px solid var(--line-2); border-radius: 6px; background: var(--surface); cursor: pointer; }
+.fp-sep { border-top: 1px solid var(--line); margin: 2px 0; }
+.fmt-pop .link { align-self: flex-start; font-size: 12px; }
+.seg { display: flex; background: var(--surface-2); border-radius: 7px; padding: 2px; flex: 1; }
+.seg-b { flex: 1; border: 0; background: transparent; border-radius: 5px; padding: 3px 6px; cursor: pointer; font-size: 12px; color: var(--text-2); }
+.seg-b.on { background: var(--surface); color: var(--text); box-shadow: var(--shadow); font-weight: 600; }
+
 /* 파일 놓기 */
 .drop { flex: 1; display: grid; place-items: center; padding: 24px; }
 .drop-box {
@@ -380,6 +407,7 @@ table.grid { border-collapse: separate; border-spacing: 0; font-size: 12.5px; }
         <button class="tab" data-view="result">결과</button>
       </div>
       <div id="shape" class="shape"></div>
+      <label class="tgl fmt-tgl" title="결과 미리보기에 엑셀 서식(색·글꼴·숫자 형식·열 너비) 표시"><input type="checkbox" id="fmtView" checked><span>서식 보기</span></label>
       <div class="spacer"></div>
       <div class="export">
         <input type="text" id="outName" class="out-name" spellcheck="false">
@@ -490,6 +518,8 @@ const S = {
   sheet: null,
   sheets: {},     // 시트명 → { grid, merges, read, steps, toggled:Set, detected }
   view: 'result',
+  fmtView: true,  // 미리보기에 엑셀 서식 표시
+  colStyles: null,
   base: null,     // 읽기 설정 적용한 표 + 행 정보
   out: null,      // 최종 결과 표
   stepInfo: [],   // 단계별 { inCols, rows, cols, error, warn }
@@ -1760,6 +1790,7 @@ function renderReadInfo() {
 }
 function selectSheet(sn) {
   S.sheet = sn;
+  closeFmtPop();
   $('ruleName').value = '';
   renderFile(); renderRead();
   refresh(true);
@@ -1806,19 +1837,33 @@ function renderResult(view) {
   $('shape').innerHTML = `결과 <b>${t.rows.length.toLocaleString()}</b>행 · <b>${t.cols.length}</b>열`;
   if (!t.cols.length) { view.innerHTML = '<div class="empty-res">남은 열이 없음. 가공 단계를 확인해 줘.</div>'; return; }
   const n = Math.min(t.rows.length, PREVIEW_ROWS);
-  let html = '<table class="grid"><thead><tr><th class="rn"></th>';
-  t.cols.forEach((c, i) => { html += `<th>${esc(c)}<span class="ty">${colType(t.rows, i)}</span></th>`; });
+  const xl = S.fmtView;
+  const cs = S.colStyles = computeColStyles(t);
+  const wcss = cs.map((x) => (x.width ? `width:${widthPx(x.width)}px;min-width:${widthPx(x.width)}px;max-width:${widthPx(x.width)}px;` : ''));
+  const hcss = cs.map((x, j) => wcss[j] + styleCss(x.head));
+  const dcss = cs.map((x, j) => wcss[j] + styleCss(x.data));
+  const nf = cs.map((x) => (x.data && x.data.numFmt) || null);
+  let html = `<table class="grid${xl ? ' xl' : ''}"><thead><tr><th class="rn"></th>`;
+  t.cols.forEach((c, i) => { html += `<th class="fh" data-col="${i}" title="눌러서 서식 편집"${xl ? ` style="${esc(hcss[i])}"` : ''}>${esc(c)}<span class="ty">${colType(t.rows, i)}</span></th>`; });
   html += '</tr></thead><tbody>';
   for (let r = 0; r < n; r++) {
     const kind = t.rows[r].kind;
     html += `<tr${kind ? ` class="k-${kind}"` : ''}><td class="rn">${r + 1}</td>`;
-    for (const v of t.rows[r]) html += cellHtml(v);
+    if (!xl) { for (const v of t.rows[r]) html += cellHtml(v); }
+    else t.rows[r].forEach((v, j) => {
+      const s2 = fmtVal(v, nf[j]);
+      const cls = v == null ? 'e' : (typeof v === 'number' || v instanceof Date) ? 'n' : '';
+      html += `<td class="${cls}" style="${esc(dcss[j])}"${s2.length > 40 ? ` title="${esc(s2)}"` : ''}>${esc(s2)}</td>`;
+    });
     html += '</tr>';
   }
   html += '</tbody></table>';
   if (!t.rows.length) html += '<div class="empty-res">조건에 맞는 행이 없음</div>';
   if (t.rows.length > n) html += `<div class="more">미리보기는 ${n.toLocaleString()}행까지. 내려받으면 ${t.rows.length.toLocaleString()}행 전부 들어감</div>`;
   view.innerHTML = html;
+  // 열 너비가 바뀌면 편집 창 위치도 다시
+  const pop = $('fmtPop');
+  if (pop) { const th = view.querySelector(`th.fh[data-col="${pop.dataset.col}"]`); if (th) placeFmtPop(pop, th); else closeFmtPop(); }
 }
 function renderRaw(view) {
   const sh = cur(); const b = S.base;
@@ -1877,16 +1922,39 @@ const isDateFmt = (f) => !!f && XLSX.SSF.is_date(f);
 const toUtcDate = (d) => new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), d.getMinutes(), d.getSeconds()));
 function textWidth(v) { return [...str(v)].reduce((a, ch) => a + (ch.charCodeAt(0) > 255 ? 2 : 1), 0); }
 
-async function exportXlsx(t, name) {
-  const outline = t.rows.some((r) => r.kind);
-  const wb = new ExcelJS.Workbook();
-  const sheetName = safeName(S.sheet || '결과').replace(/[\[\]]/g, '_').slice(0, 31);
-  const ws = wb.addWorksheet(sheetName === '가이드' ? '결과' : sheetName, {
-    views: [{ state: 'frozen', ySplit: 1 }],
-    properties: outline ? { outlineLevelRow: 1, outlineProperties: { summaryBelow: true } } : {},
-  });
-  // 열별 서식: 템플릿 > 원본 열 > 기본
-  const colSt = t.cols.map((_, j) => {
+// ───────────────────────── 열 서식 계산·편집 ─────────────────────────
+// 우선순위: 사용자 편집 > 템플릿 > 원본 열 > 기본. 미리보기와 엑셀 내보내기가 같은 결과를 씀
+const THEME_COLORS = ['FFFFFF', '000000', 'E7E6E6', '44546A', '4472C4', 'ED7D31', 'A5A5A5', 'FFC000', '5B9BD5', '70AD47'];
+function tintHex(hex, tint) {
+  if (!tint) return hex;
+  const ch = [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16)).map((v) => Math.round(tint < 0 ? v * (1 + tint) : v + (255 - v) * tint));
+  return ch.map((v) => Math.max(0, Math.min(255, v)).toString(16).padStart(2, '0')).join('');
+}
+function colorCss(c) {
+  if (!c) return null;
+  if (c.argb && /^[0-9a-f]{8}$/i.test(c.argb)) return '#' + c.argb.slice(2);
+  if (c.theme != null && THEME_COLORS[c.theme]) return '#' + tintHex(THEME_COLORS[c.theme], c.tint);
+  return null;
+}
+const cssToArgb = (css) => 'FF' + css.replace('#', '').toUpperCase();
+function fmtState() {
+  const sh = cur();
+  if (!sh.fmt) sh.fmt = { cols: {}, head: {} };
+  return sh.fmt;
+}
+function applyOv(style, ov) {
+  if (!ov || !Object.keys(ov).length) return style;
+  const s = style ? JSON.parse(JSON.stringify(style)) : {};
+  if (ov.numFmt !== undefined) { if (ov.numFmt === 'General') delete s.numFmt; else s.numFmt = ov.numFmt; }
+  if (ov.bold !== undefined) s.font = { ...(s.font || {}), bold: ov.bold };
+  if (ov.color !== undefined) { s.font = { ...(s.font || {}) }; if (ov.color === 'none') delete s.font.color; else s.font.color = { argb: cssToArgb(ov.color) }; }
+  if (ov.fill !== undefined) { if (ov.fill === 'none') delete s.fill; else s.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: cssToArgb(ov.fill) } }; }
+  if (ov.align !== undefined) { s.alignment = { ...(s.alignment || {}) }; if (ov.align === '') delete s.alignment.horizontal; else s.alignment.horizontal = ov.align; }
+  return Object.keys(s).length ? s : null;
+}
+function computeColStyles(t) {
+  const fs = fmtState();
+  const cols = t.cols.map((name, j) => {
     const m = t.meta[j] || { c: null, tpl: null };
     const src = sourceColStyle(m.c);
     const tpl = m.tpl || {};
@@ -1898,14 +1966,127 @@ async function exportXlsx(t, name) {
       const vs = t.rows.filter((r) => !isEmpty(r[j])).map((r) => r[j]);
       if (vs.length && vs.every((v) => typeof v === 'number')) data = { ...(data || {}), numFmt: vs.every(Number.isInteger) ? '#,##0' : '#,##0.00' };
     }
-    return { head: tpl.head || (m.valueOnly ? null : src.head), data, width: tpl.width || src.width || null };
+    const ov = fs.cols[name] || {};
+    return { head: tpl.head || (m.valueOnly ? null : src.head), data: applyOv(data, ov), width: ov.width || tpl.width || src.width || null };
   });
-  const anyHead = colSt.find((x) => x.head);
+  const anyHead = cols.find((x) => x.head);
   const fallbackHead = anyHead ? anyHead.head : DEFAULT_HEAD;
+  cols.forEach((x) => { x.head = applyOv(x.head || fallbackHead, fs.head); });
+  return cols;
+}
+function styleCss(st) {
+  if (!st) return '';
+  const p = [];
+  const f = st.font || {};
+  if (f.bold) p.push('font-weight:700'); else if (f.bold === false) p.push('font-weight:400');
+  if (f.italic) p.push('font-style:italic');
+  if (f.underline) p.push('text-decoration:underline');
+  const fc = colorCss(f.color); if (fc) p.push(`color:${fc}`);
+  if (st.fill && st.fill.type === 'pattern' && st.fill.pattern && st.fill.pattern !== 'none') { const bc = colorCss(st.fill.fgColor); if (bc) p.push(`background:${bc}`); }
+  const a = st.alignment && st.alignment.horizontal;
+  if (['left', 'center', 'right'].includes(a)) p.push(`text-align:${a}`);
+  return p.join(';');
+}
+// 엑셀 숫자 형식대로 표시 (실패하면 기본 표시)
+function fmtVal(v, numFmt) {
+  if (v == null) return '';
+  try {
+    if (numFmt && numFmt !== 'General') {
+      if (typeof v === 'number') return XLSX.SSF.format(numFmt, v);
+      if (v instanceof Date && isDateFmt(numFmt)) return XLSX.SSF.format(numFmt, serial(v));
+    }
+  } catch (e) { /* 형식 해석 실패 */ }
+  if (typeof v === 'number') return Number.isInteger(v) ? v.toLocaleString('ko-KR') : v.toLocaleString('ko-KR', { maximumFractionDigits: 10 });
+  return str(v);
+}
+const widthPx = (w) => Math.round(w * 7.5 + 12);
+
+const NUMFMT_PRESETS = [
+  ['', '원본 그대로'], ['General', '일반 (형식 없음)'], ['#,##0', '1,234'], ['#,##0.00', '1,234.56'], ['#,##0"원"', '1,234원'],
+  ['0%', '12%'], ['0.0%', '12.3%'], ['yyyy-mm-dd', '2026-01-05'], ['yyyy"년" m"월" d"일"', '2026년 1월 5일'], ['yyyy-mm-dd hh:mm', '2026-01-05 13:30'],
+  ['@', '글자 그대로'], ['__custom', '직접 입력…'],
+];
+const ALIGNS = [['', '원본'], ['left', '왼쪽'], ['center', '가운데'], ['right', '오른쪽']];
+
+function closeFmtPop() { const p = $('fmtPop'); if (p) p.remove(); }
+function openFmtPop(j, anchor) {
+  closeFmtPop();
+  // 표가 다시 그려져 기준 머리글이 바뀌었으면 새로 찾음
+  if (!anchor || !anchor.isConnected) anchor = document.querySelector(`th.fh[data-col="${j}"]`);
+  if (!anchor || !S.out || j >= S.out.cols.length) return;
+  const name = S.out.cols[j];
+  const fs = fmtState();
+  const ov = fs.cols[name] || (fs.cols[name] = {});
+  const eff = (S.colStyles && S.colStyles[j]) || {};
+  const effData = eff.data || {};
+  const effHead = eff.head || {};
+  const upd = () => { if (!Object.keys(ov).length) delete fs.cols[name]; changed(false); };
+  const colorRow = (label, cur, key, target) => {
+    const inp = h('input', { type: 'color', value: cur || '#000000', oninput: (e) => { target[key] = e.target.value; upd(); } });
+    return h('div', { class: 'fp-row' }, h('span', { class: 'fp-l' }, label), inp,
+      h('button', { class: 'btn ghost sm', title: '색 없음', onclick: () => { target[key] = 'none'; upd(); } }, '없음'),
+      h('button', { class: 'btn ghost sm', title: '원본 색으로', onclick: () => { delete target[key]; upd(); } }, '원본'));
+  };
+  const presetVal = ov.numFmt === undefined ? '' : (NUMFMT_PRESETS.some(([v]) => v === ov.numFmt) ? ov.numFmt : '__custom');
+  const custom = h('input', { type: 'text', value: presetVal === '__custom' ? ov.numFmt : '', placeholder: '예: #,##0"건"', spellcheck: 'false',
+    hidden: presetVal !== '__custom', oninput: (e) => { if (e.target.value.trim()) ov.numFmt = e.target.value; else delete ov.numFmt; upd(); } });
+  const numSel = select(NUMFMT_PRESETS, presetVal, (v) => {
+    custom.hidden = v !== '__custom';
+    if (v === '') delete ov.numFmt; else if (v !== '__custom') ov.numFmt = v; else custom.focus();
+    upd();
+  });
+  const seg = (opts, val, onpick) => h('div', { class: 'seg' }, ...opts.map(([v, l]) => h('button', { class: 'seg-b' + (v === val ? ' on' : ''), onclick: (e) => {
+    e.currentTarget.parentNode.querySelectorAll('.seg-b').forEach((b) => b.classList.remove('on')); e.currentTarget.classList.add('on'); onpick(v);
+  } }, l)));
+  const boldVal = ov.bold === undefined ? '' : ov.bold ? '1' : '0';
+  const pop = h('div', { id: 'fmtPop', class: 'fmt-pop' },
+    h('div', { class: 'fp-h' }, h('b', null, name), h('span', { class: 'muted' }, ' 열 서식'),
+      h('button', { class: 'icon-btn', style: 'margin-left:auto', title: '닫기', onclick: closeFmtPop }, '×')),
+    h('div', { class: 'fp-row' }, h('span', { class: 'fp-l' }, '숫자 형식'), numSel),
+    custom,
+    h('div', { class: 'fp-row' }, h('span', { class: 'fp-l' }, '굵게'), seg([['', '원본'], ['1', '굵게'], ['0', '보통']], boldVal, (v) => { if (v === '') delete ov.bold; else ov.bold = v === '1'; upd(); })),
+    colorRow('글자색', colorCss((effData.font || {}).color), 'color', ov),
+    colorRow('배경색', colorCss((effData.fill || {}).fgColor) || '#ffffff', 'fill', ov),
+    h('div', { class: 'fp-row' }, h('span', { class: 'fp-l' }, '맞춤'), seg(ALIGNS, ov.align === undefined ? '' : ov.align, (v) => { if (v === '') delete ov.align; else ov.align = v; upd(); })),
+    h('div', { class: 'fp-row' }, h('span', { class: 'fp-l' }, '열 너비'),
+      h('input', { type: 'number', min: '2', max: '100', step: '1', value: ov.width || '', placeholder: eff.width ? String(Math.round(eff.width)) : '자동',
+        oninput: (e) => { const w = parseFloat(e.target.value); if (w > 0) ov.width = Math.min(100, w); else delete ov.width; upd(); } }),
+      h('span', { class: 'muted fp-u' }, '글자 수')),
+    h('button', { class: 'link', onclick: () => { Object.keys(ov).forEach((k) => delete ov[k]); upd(); setTimeout(() => openFmtPop(j), 220); } }, '이 열 원래대로'),
+    h('div', { class: 'fp-sep' }),
+    h('div', { class: 'fp-h2' }, '머리글 줄 전체'),
+    colorRow('배경색', colorCss((effHead.fill || {}).fgColor) || '#ffffff', 'fill', fs.head),
+    colorRow('글자색', colorCss((effHead.font || {}).color), 'color', fs.head),
+    h('div', { class: 'fp-row' }, h('span', { class: 'fp-l' }, '굵게'), seg([['', '원본'], ['1', '굵게'], ['0', '보통']], fs.head.bold === undefined ? '' : fs.head.bold ? '1' : '0', (v) => { if (v === '') delete fs.head.bold; else fs.head.bold = v === '1'; changed(false); })),
+    h('button', { class: 'link', onclick: () => { fs.head = {}; changed(false); setTimeout(() => openFmtPop(j), 220); } }, '머리글 원래대로'));
+  pop.dataset.col = j;
+  document.body.append(pop);
+  placeFmtPop(pop, anchor);
+}
+function placeFmtPop(pop, anchor) {
+  const r = anchor.getBoundingClientRect();
+  const w = pop.offsetWidth, hgt = pop.offsetHeight;
+  // 편집 중인 열을 가리지 않게 열 오른쪽, 자리 없으면 왼쪽
+  let left = r.right + 8;
+  if (left + w > window.innerWidth - 8) left = r.left - w - 8;
+  if (left < 8) left = Math.max(8, window.innerWidth - w - 8);
+  pop.style.left = left + 'px';
+  pop.style.top = Math.max(8, Math.min(window.innerHeight - hgt - 8, r.top)) + 'px';
+}
+
+async function exportXlsx(t, name) {
+  const outline = t.rows.some((r) => r.kind);
+  const wb = new ExcelJS.Workbook();
+  const sheetName = safeName(S.sheet || '결과').replace(/[\[\]]/g, '_').slice(0, 31);
+  const ws = wb.addWorksheet(sheetName === '가이드' ? '결과' : sheetName, {
+    views: [{ state: 'frozen', ySplit: 1 }],
+    properties: outline ? { outlineLevelRow: 1, outlineProperties: { summaryBelow: true } } : {},
+  });
+  const colSt = computeColStyles(t);
   const widths = t.cols.map((c, j) => colSt[j].width || Math.min(40, Math.max(6, textWidth(c) + 2)));
 
   const hdr = ws.addRow(t.cols);
-  hdr.eachCell((cell, k) => { cell.style = colSt[k - 1].head || fallbackHead; });
+  hdr.eachCell((cell, k) => { if (colSt[k - 1].head) cell.style = colSt[k - 1].head; });
 
   const boldOf = colSt.map((x) => ({ ...(x.data || {}), font: { ...((x.data && x.data.font) || {}), bold: true } }));
   t.rows.forEach((r, ri) => {
@@ -1982,6 +2163,7 @@ function currentRule(name) {
     read: { ...sh.read },
     steps: sh.steps.map(({ open, _scroll, ...rest }) => rest),
     output: { format: $('outFmt').value },
+    fmt: JSON.parse(JSON.stringify(sh.fmt || { cols: {}, head: {} })),
   };
 }
 function applyRule(rule) {
@@ -1989,6 +2171,7 @@ function applyRule(rule) {
   if (rule.read) Object.assign(sh.read, rule.read);
   sh.steps = rule.steps.map((s) => ({ ...s, open: false }));
   sh.toggled = new Set();
+  sh.fmt = rule.fmt && rule.fmt.cols ? JSON.parse(JSON.stringify(rule.fmt)) : { cols: {}, head: {} };
   if (rule.output && rule.output.format) $('outFmt').value = rule.output.format;
   $('ruleName').value = rule.name;
   renderRead(); refresh(true); renderRules();
@@ -2069,7 +2252,8 @@ async function importRules(file) {
 }
 function resetRule() {
   const sh = cur(); if (!sh) return;
-  sh.steps = []; sh.toggled = new Set();
+  sh.steps = []; sh.toggled = new Set(); sh.fmt = { cols: {}, head: {} };
+  closeFmtPop();
   const d = detectHeader(sh.grid, sh.merges);
   sh.read = { headerStart: d.headerStart, headerRows: d.headerRows, fillMerges: true, dropSubtotals: true };
   $('ruleName').value = '';
@@ -2101,7 +2285,7 @@ async function openFile(file) {
     for (const sn of wb.SheetNames) {
       const { grid, merges } = sheetToGrid(wb.Sheets[sn]);
       const d = detectHeader(grid, merges);
-      S.sheets[sn] = { grid, merges, xws: xwb ? xwb.getWorksheet(sn) : null, toggled: new Set(), steps: [], read: { headerStart: d.headerStart, headerRows: d.headerRows, fillMerges: true, dropSubtotals: true } };
+      S.sheets[sn] = { grid, merges, xws: xwb ? xwb.getWorksheet(sn) : null, toggled: new Set(), steps: [], fmt: { cols: {}, head: {} }, read: { headerStart: d.headerStart, headerRows: d.headerRows, fillMerges: true, dropSubtotals: true } };
       if (!first && grid.length) first = sn;
     }
     S.sheet = first || wb.SheetNames[0];
@@ -2134,7 +2318,11 @@ function bind() {
   $('btnResetRule').onclick = resetRule;
   $('btnAdd').onclick = () => { const m = $('addMenu'); m.hidden = !m.hidden; };
   $('btnDown').onclick = doDownload;
-  document.querySelectorAll('.tab').forEach((b) => { b.onclick = () => { S.view = b.dataset.view; renderView(); }; });
+  document.querySelectorAll('.tab').forEach((b) => { b.onclick = () => { S.view = b.dataset.view; closeFmtPop(); renderView(); }; });
+  $('fmtView').onchange = (e) => { S.fmtView = e.target.checked; renderView(); };
+  // 편집 창 바깥 누르면 닫기 (머리글 클릭은 위에서 처리)
+  document.addEventListener('mousedown', (e) => { const p = $('fmtPop'); if (p && !p.contains(e.target) && !e.target.closest('th.fh')) closeFmtPop(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeFmtPop(); });
 
   $('hdrStart').onchange = (e) => {
     const sh = cur(); let v = parseInt(e.target.value, 10);
@@ -2154,6 +2342,8 @@ function bind() {
       if (sh.toggled.has(r)) sh.toggled.delete(r); else sh.toggled.add(r);
       refresh(false); return;
     }
+    const fh = e.target.closest('th.fh');
+    if (fh && S.view === 'result') { openFmtPop(+fh.dataset.col, fh); return; }
     const rn = e.target.closest('[data-hdr]');
     if (rn && S.view === 'raw') {
       const sh = cur(); sh.read.headerStart = +rn.dataset.hdr; sh.toggled = new Set();
