@@ -169,6 +169,12 @@ input[type=text]:focus, input[type=number]:focus, select:focus { border-color: v
 /* 열 정리 목록 */
 .col-list { display: flex; flex-direction: column; gap: 3px; max-height: 320px; overflow-y: auto; padding-right: 2px; }
 .col-item { display: flex; align-items: center; gap: 6px; padding: 2px 0; }
+.col-item .drag { flex: none; width: 18px; text-align: center; color: var(--text-3); cursor: grab; touch-action: none; user-select: none; font-size: 16px; line-height: 1; }
+.col-item .drag:hover { color: var(--accent); }
+.col-item.dragging { opacity: .45; }
+.col-item.drop-before { box-shadow: inset 0 2px 0 var(--accent); }
+.col-item.drop-after { box-shadow: inset 0 -2px 0 var(--accent); }
+body.drag-active, body.drag-active * { cursor: grabbing !important; user-select: none; }
 .col-item input[type=checkbox] { accent-color: var(--accent); flex: none; margin: 0; }
 .col-item .src { width: 38%; flex: none; font-size: 12px; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .col-item.missing .src { color: var(--danger); text-decoration: line-through; }
@@ -1290,24 +1296,25 @@ function stepBody(st, cols, idx) {
   switch (st.type) {
     case 'columns': {
       reconcileColumns(st, cols);
-      const list = h('div', { class: 'col-list' });
+      const list = h('div', { class: 'col-list', onscroll: (e) => { st._scroll = e.target.scrollTop; } });
       st.items.forEach((it, k) => {
         const missing = !cols.includes(it.src);
         list.append(h('div', { class: 'col-item' + (missing ? ' missing' : '') + (it.keep ? '' : ' dim') },
+          h('span', { class: 'drag', title: '끌어서 순서 바꾸기', onpointerdown: (e) => startColDrag(e, list, st.items) }, '⠿'),
           h('input', { type: 'checkbox', checked: it.keep, title: '결과에 넣기', onchange: (e) => { it.keep = e.target.checked; changed(true); } }),
           h('span', { class: 'src', title: it.src }, it.src),
           h('input', { type: 'text', value: it.name, placeholder: it.src, spellcheck: 'false', oninput: (e) => { it.name = e.target.value; changed(false); }, onchange: () => changed(true) }),
-          h('button', { class: 'icon-btn', title: '위로', disabled: k === 0, onclick: C(() => { st.items.splice(k - 1, 0, st.items.splice(k, 1)[0]); }) }, '↑'),
-          h('button', { class: 'icon-btn', title: '아래로', disabled: k === st.items.length - 1, onclick: C(() => { st.items.splice(k + 1, 0, st.items.splice(k, 1)[0]); }) }, '↓'),
           missing ? h('button', { class: 'icon-btn', title: '목록에서 지우기', onclick: C(() => st.items.splice(k, 1)) }, '×') : null));
       });
       return [
         h('div', { class: 'mini-actions' },
           h('button', { class: 'link', onclick: C(() => st.items.forEach((x) => { x.keep = true; })) }, '모두 선택'),
           h('button', { class: 'link', onclick: C(() => st.items.forEach((x) => { x.keep = false; })) }, '모두 해제'),
-          h('button', { class: 'link', onclick: C(() => st.items.forEach((x) => { x.name = x.src; })) }, '이름 원래대로')),
+          h('button', { class: 'link', onclick: C(() => st.items.forEach((x) => { x.name = x.src; })) }, '이름 원래대로'),
+          h('button', { class: 'link', onclick: C(() => { st.items.sort((a, b) => (b.keep - a.keep)); }) }, '선택한 열 위로')),
         list,
       ];
+      requestAnimationFrame(() => { if (st._scroll) list.scrollTop = st._scroll; });
     }
     case 'filter': {
       const out = [];
@@ -1488,6 +1495,46 @@ function guideRows() {
   ];
   sh.steps.forEach((st) => { if (st.on !== false) rows.push([STEP_DEFS[st.type].label, STEP_DEFS[st.type].summary(st)]); });
   return rows;
+}
+
+// 열 정리: 손잡이를 끌어서 순서 바꾸기 (마우스·터치 공통 pointer 이벤트)
+function startColDrag(e, listEl, items) {
+  if (e.button !== undefined && e.button !== 0) return;
+  e.preventDefault();
+  const rows = [...listEl.querySelectorAll('.col-item')];
+  const from = rows.indexOf(e.currentTarget.closest('.col-item'));
+  if (from < 0) return;
+  rows[from].classList.add('dragging');
+  document.body.classList.add('drag-active');
+  let to = from, lastY = e.clientY, timer = null;
+  const mark = () => {
+    rows.forEach((x, i) => {
+      x.classList.toggle('drop-before', i === to && to !== from && to !== from + 1);
+      x.classList.toggle('drop-after', to === rows.length && i === rows.length - 1 && from !== rows.length - 1);
+    });
+  };
+  const locate = () => {
+    to = rows.length;
+    for (let i = 0; i < rows.length; i++) { const b = rows[i].getBoundingClientRect(); if (lastY < b.top + b.height / 2) { to = i; break; } }
+    mark();
+  };
+  // 목록 끝에 가까우면 자동 스크롤
+  const scroll = () => {
+    const r = listEl.getBoundingClientRect();
+    if (lastY < r.top + 28) listEl.scrollTop -= 10; else if (lastY > r.bottom - 28) listEl.scrollTop += 10; else return;
+    locate();
+  };
+  timer = setInterval(scroll, 30);
+  const move = (ev) => { lastY = ev.clientY; locate(); };
+  const up = () => {
+    clearInterval(timer);
+    window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); window.removeEventListener('pointercancel', up);
+    rows.forEach((x) => x.classList.remove('drop-before', 'drop-after', 'dragging'));
+    document.body.classList.remove('drag-active');
+    const dest = to > from ? to - 1 : to;
+    if (dest !== from) { items.splice(dest, 0, items.splice(from, 1)[0]); changed(true); }
+  };
+  window.addEventListener('pointermove', move); window.addEventListener('pointerup', up); window.addEventListener('pointercancel', up);
 }
 
 function renderSteps() {
@@ -1784,7 +1831,7 @@ function currentRule(name) {
     file: S.fileName,
     savedAt: new Date().toISOString(),
     read: { ...sh.read },
-    steps: sh.steps.map(({ open, ...rest }) => rest),
+    steps: sh.steps.map(({ open, _scroll, ...rest }) => rest),
     output: { format: $('outFmt').value },
   };
 }

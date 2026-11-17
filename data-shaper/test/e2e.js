@@ -115,6 +115,17 @@ const SHOT = process.env.SHOT_DIR || path.join(__dirname, 'shots');
   console.log('직원', JSON.stringify(await page.evaluate(() => ({ read: cur().read, cols: S.out.cols, n: S.out.rows.length, r: S.out.rows.slice(0, 4), info: S.stepInfo.map((x) => x.error || x.warn) }))));
   await page.screenshot({ path: `${SHOT}/5-emp.png` });
 
+  // 열 정리: 손잡이 끌어서 순서 바꾸기 (4번째 열을 맨 위로)
+  await page.evaluate(() => { const sh = cur(); sh.steps = []; refresh(true); addStep('columns'); });
+  const handles = page.locator('.col-item .drag');
+  const b3 = await handles.nth(3).boundingBox(), b0 = await handles.nth(0).boundingBox();
+  await page.mouse.move(b3.x + b3.width / 2, b3.y + b3.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(b0.x + 5, b0.y + 2, { steps: 8 });
+  await page.screenshot({ path: `${SHOT}/7-drag.png` });
+  await page.mouse.up();
+  console.log('끌기 후 열 순서', await page.evaluate(() => S.out.cols.join('|')));
+
   // CP949 CSV
   await page.setInputFiles('#fileIn', file(`${SAMPLE}/가짜_직원_cp949.csv`));
   await page.waitForTimeout(300);
