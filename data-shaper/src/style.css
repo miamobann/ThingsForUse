@@ -248,6 +248,8 @@ table.grid { border-collapse: separate; border-spacing: 0; font-size: 12.5px; }
 .grid td.n { text-align: right; font-variant-numeric: tabular-nums; }
 .grid td.e { color: var(--text-3); }
 .grid tbody tr:hover td { background: color-mix(in srgb, var(--accent) 5%, transparent); }
+.grid tr.k-sub td:not(.rn), .grid tr.k-grand td:not(.rn) { font-weight: 600; background: var(--surface-2); }
+.grid tr.k-grand td:not(.rn) { border-top: 2px solid var(--line-2); }
 .grid tr.r-title td { color: var(--text-3); background: var(--surface-2); }
 .grid tr.r-hdr td { background: var(--hdr-soft); font-weight: 600; }
 .grid tr.r-sub td { background: var(--warn-soft); }

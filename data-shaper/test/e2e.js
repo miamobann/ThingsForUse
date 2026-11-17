@@ -59,6 +59,21 @@ const SHOT = process.env.SHOT_DIR || path.join(__dirname, 'shots');
   }
   await page.evaluate(() => { cur().steps.pop(); cur().steps[2].on = true; refresh(true); });
 
+  // 부분합: 부서별 상반기 매출 합계 + 총합계, 엑셀 접기 그룹
+  await page.evaluate(() => {
+    const sh = cur(); sh.steps.splice(3);
+    sh.steps.push({ type: 'subtotal', on: true, open: true, by: '부서', vals: [{ col: '상반기 매출', fn: 'sum' }, { col: '', fn: 'rows' }], sort: true, grand: true, label: '소계' });
+    sh.steps[2].on = false; refresh(true);
+  });
+  console.log('부분합', JSON.stringify(await page.evaluate(() => ({ rows: S.out.rows.map((r) => [r.kind || '', r[0], r[1], r[9]]), info: S.stepInfo.at(-1) }))));
+  await page.screenshot({ path: `${SHOT}/3c-subtotal.png` });
+  {
+    await page.selectOption('#outFmt', 'xlsx');
+    const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#btnDown')]);
+    await dl.saveAs(`${SHOT}/subtotal.xlsx`);
+  }
+  await page.evaluate(() => { cur().steps.pop(); cur().steps[2].on = true; refresh(true); });
+
   // 템플릿: 집계 끄고 템플릿 연결
   await page.evaluate(() => { cur().steps.splice(3); refresh(true); });
   await page.setInputFiles('#tplIn', file(`${SAMPLE}/가짜_템플릿.xlsx`));

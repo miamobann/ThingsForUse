@@ -257,6 +257,8 @@ table.grid { border-collapse: separate; border-spacing: 0; font-size: 12.5px; }
 .grid td.n { text-align: right; font-variant-numeric: tabular-nums; }
 .grid td.e { color: var(--text-3); }
 .grid tbody tr:hover td { background: color-mix(in srgb, var(--accent) 5%, transparent); }
+.grid tr.k-sub td:not(.rn), .grid tr.k-grand td:not(.rn) { font-weight: 600; background: var(--surface-2); }
+.grid tr.k-grand td:not(.rn) { border-top: 2px solid var(--line-2); }
 .grid tr.r-title td { color: var(--text-3); background: var(--surface-2); }
 .grid tr.r-hdr td { background: var(--hdr-soft); font-weight: 600; }
 .grid tr.r-sub td { background: var(--warn-soft); }
@@ -705,6 +707,8 @@ function buildBase(sh) {
 }
 
 // ───────────────────────── 가공 단계 ─────────────────────────
+// 부분합이 붙인 행 종류(kind)를 새 배열에도 옮김
+function keepKind(src, dst) { if (src.kind) dst.kind = src.kind; return dst; }
 function ci(t, name) {
   const i = t.cols.indexOf(name);
   if (i < 0) throw new Error(`'${name}' 열이 없음`);
@@ -841,7 +845,7 @@ const STEP_DEFS = {
       const names = [];
       items.forEach((x) => names.push(uniqName(names, (x.name || x.src).trim() || x.src)));
       const missing = st.items.filter((x) => x.keep && !t.cols.includes(x.src)).map((x) => x.src);
-      return { cols: names, rows: t.rows.map((r) => idx.map((i) => r[i])), warn: missing.length ? `원본에 없는 열: ${missing.join(', ')}` : null };
+      return { cols: names, rows: t.rows.map((r) => keepKind(r, idx.map((i) => r[i]))), warn: missing.length ? `원본에 없는 열: ${missing.join(', ')}` : null };
     },
     summary: (st) => { const k = st.items.filter((x) => x.keep); const rn = k.filter((x) => x.name && x.name !== x.src).length; return `${k.length}개 열${rn ? ` · 이름 ${rn}개 변경` : ''}`; },
   },
@@ -901,7 +905,7 @@ const STEP_DEFS = {
     init: (cols) => ({ cols: cols[0] ? [cols[0]] : [], action: 'trim', fmt: 'YYYY-MM-DD', find: '', to: '', whole: true, fill: 'above', fillVal: '' }),
     apply(t, st) {
       const ix = st.cols.map((c) => ci(t, c));
-      const rows = t.rows.map((r) => r.slice());
+      const rows = t.rows.map((r) => keepKind(r, r.slice()));
       let fails = 0;
       for (const i of ix) {
         let prev = null;
@@ -990,7 +994,7 @@ const STEP_DEFS = {
       const ix = {}; used.forEach((c) => { ix[c] = ci(t, c); });
       let bad = 0;
       const name = uniqName(t.cols, (st.name || '계산').trim());
-      const rows = t.rows.map((r) => { const v = evalExpr(tree, (c) => r[ix[c]]); if (v == null) bad++; return [...r, v == null ? null : +v.toPrecision(15)]; });
+      const rows = t.rows.map((r) => { const v = evalExpr(tree, (c) => r[ix[c]]); if (v == null) bad++; return keepKind(r, [...r, v == null ? null : +v.toPrecision(15)]); });
       return { cols: [...t.cols, name], rows, warn: bad ? `계산 못 한 행 ${bad.toLocaleString()}개 (숫자가 아니거나 0으로 나눔)` : null };
     },
     summary: (st) => st.expr ? `${st.name || '계산'} = ${st.expr}` : '식 입력 필요',
@@ -1019,6 +1023,44 @@ const STEP_DEFS = {
       return { cols: names, rows };
     },
     summary: (st) => `${st.by.length ? st.by.join(', ') + '별' : '전체'} · ${st.aggs.map((a) => a.fn === 'rows' ? '행 수' : `${a.col || '?'} ${fnLabel(a.fn)}`).join(', ')}`,
+  },
+  subtotal: {
+    label: '부분합', icon: '≡', desc: '그룹마다 소계 줄 끼우기',
+    init: (cols) => ({ by: cols[0] || '', vals: [{ col: cols.find((c, i) => i > 0) || '', fn: 'sum' }], sort: true, grand: true, label: '소계' }),
+    apply(t, st) {
+      if (!st.by) throw new Error('기준 열을 골라야 함');
+      const bi = ci(t, st.by);
+      const vs = st.vals.filter((v) => v.col || v.fn === 'rows').map((v) => ({ ...v, i: v.fn === 'rows' ? -1 : ci(t, v.col) }));
+      if (!vs.length) throw new Error('계산할 값을 하나 이상 골라야 함');
+      // 이미 붙은 소계 줄은 다시 계산하지 않음
+      let data = t.rows.filter((r) => !r.kind);
+      if (st.sort) data = data.map((r, k) => [r, k]).sort((A, B) => cmp(A[0][bi], B[0][bi]) || A[1] - B[1]).map((x) => x[0]);
+      const ncol = t.cols.length;
+      const makeRow = (rows, label, kind) => {
+        const out = new Array(ncol).fill(null);
+        out[bi] = label;
+        for (const v of vs) {
+          // 행 수는 기준 열 오른쪽 첫 칸에 (기준 열과 겹치지 않게)
+          const at = v.i >= 0 ? v.i : (bi + 1 < ncol ? bi + 1 : bi);
+          out[at] = aggregate(rows, v.i, v.fn);
+        }
+        out.kind = kind;
+        return out;
+      };
+      const out = [];
+      let grp = [], key = null;
+      const flush = () => { if (grp.length) out.push(makeRow(grp, `${str(grp[0][bi]) || '(빈 값)'} ${st.label || '소계'}`.trim(), 'sub')); };
+      for (const r of data) {
+        const k = str(r[bi]);
+        if (key !== null && k !== key) { flush(); grp = []; }
+        key = k; grp.push(r); out.push(r);
+      }
+      flush();
+      if (st.grand && data.length) out.push(makeRow(data, '총합계', 'grand'));
+      const groups = out.filter((r) => r.kind === 'sub').length;
+      return { cols: t.cols, rows: out, warn: !st.sort && groups > new Set(data.map((r) => str(r[bi]))).size ? '같은 그룹이 떨어져 있어 소계가 여러 번 나옴 (정렬 켜기 추천)' : null };
+    },
+    summary: (st) => `${st.by || '?'} 기준 · ${st.vals.map((v) => v.fn === 'rows' ? '행 수' : `${v.col || '?'} ${fnLabel(v.fn)}`).join(', ')}`,
   },
   pivot: {
     label: '피벗', icon: '⊞', desc: '행×열 교차표',
@@ -1073,7 +1115,7 @@ const STEP_DEFS = {
       const empty = st.targets.filter((x, k) => ix[k] < 0).length;
       const names = []; st.targets.forEach((x) => names.push(uniqName(names, x.name)));
       const warn = [lost.length ? `없는 열: ${lost.join(', ')}` : '', empty ? `빈 열로 나가는 항목 ${empty}개` : ''].filter(Boolean).join(' · ');
-      return { cols: names, rows: t.rows.map((r) => ix.map((i) => (i < 0 ? null : r[i]))), warn: warn || null };
+      return { cols: names, rows: t.rows.map((r) => keepKind(r, ix.map((i) => (i < 0 ? null : r[i])))), warn: warn || null };
     },
     summary: (st) => `${st.file || '템플릿'} · ${st.targets.length}개 열 · 연결 ${st.targets.filter((x) => x.src).length}개`,
   },
@@ -1321,6 +1363,22 @@ function stepBody(st, cols, idx) {
       out.push(h('button', { class: 'btn ghost sm sub-add', onclick: C(() => st.aggs.push({ col: cols[0] || '', fn: 'sum', name: '' })) }, '＋ 값 추가'));
       return out;
     }
+    case 'subtotal': {
+      const out = [
+        h('div', { class: 'lbl' }, '기준 열 (값이 바뀔 때마다 소계 줄)'),
+        colSelect(cols, st.by, (v) => { st.by = v; changed(true); }, '열 선택'),
+        h('div', { class: 'lbl' }, '소계 낼 값'),
+      ];
+      st.vals.forEach((v, k) => out.push(h('div', { class: 'row' },
+        v.fn === 'rows' ? h('span', { class: 'muted' }, '—') : colSelect(cols, v.col, (x) => { v.col = x; changed(true); }, '열 선택'),
+        select(AGG_FNS, v.fn, (x) => { v.fn = x; changed(true); }),
+        h('button', { class: 'icon-btn', title: '빼기', onclick: C(() => st.vals.splice(k, 1)) }, '×'))));
+      out.push(h('button', { class: 'btn ghost sm sub-add', onclick: C(() => st.vals.push({ col: '', fn: 'sum' })) }, '＋ 값 추가'));
+      out.push(h('div', { class: 'row' }, h('span', { class: 'fixed muted' }, '줄 이름'), textInput(st, 'label', '소계')));
+      out.push(h('label', { class: 'tgl' }, h('input', { type: 'checkbox', checked: st.sort, onchange: (e) => { st.sort = e.target.checked; changed(true); } }), h('span', null, '기준 열로 먼저 정렬')));
+      out.push(h('label', { class: 'tgl' }, h('input', { type: 'checkbox', checked: st.grand, onchange: (e) => { st.grand = e.target.checked; changed(true); } }), h('span', null, '맨 아래 총합계')));
+      return out;
+    }
     case 'pivot': {
       const fnOpts = AGG_FNS;
       const out = [
@@ -1523,6 +1581,7 @@ function cellHtml(v) {
 function colType(rows, i) {
   let n = 0, d = 0, s = 0;
   for (let r = 0; r < rows.length && r < 2000; r++) {
+    if (rows[r].kind) continue; // 소계 줄은 형식 판단에서 제외
     const v = rows[r][i];
     if (isEmpty(v)) continue;
     if (typeof v === 'number') n++; else if (v instanceof Date) d++; else s++;
@@ -1556,7 +1615,8 @@ function renderResult(view) {
   t.cols.forEach((c, i) => { html += `<th>${esc(c)}<span class="ty">${colType(t.rows, i)}</span></th>`; });
   html += '</tr></thead><tbody>';
   for (let r = 0; r < n; r++) {
-    html += `<tr><td class="rn">${r + 1}</td>`;
+    const kind = t.rows[r].kind;
+    html += `<tr${kind ? ` class="k-${kind}"` : ''}><td class="rn">${r + 1}</td>`;
     for (const v of t.rows[r]) html += cellHtml(v);
     html += '</tr>';
   }
@@ -1612,6 +1672,21 @@ function download(blob, name) {
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }
 function safeName(s) { return s.replace(/[\\/:*?"<>|]/g, '_').trim() || '결과'; }
+// 엑셀이 접기 버튼 영역을 바로 그리도록 sheetFormatPr outlineLevelRow 추가 (라이브러리가 안 넣어줌)
+function addOutlineLevel(data) {
+  try {
+    const zip = XLSX.CFB.read(new Uint8Array(data), { type: 'array' });
+    const ent = XLSX.CFB.find(zip, '/xl/worksheets/sheet1.xml');
+    if (!ent) return data;
+    let xml = new TextDecoder().decode(ent.content);
+    if (xml.includes('outlineLevelRow')) return data;
+    // 스키마 순서: sheetViews → sheetFormatPr → cols → sheetData
+    const at = xml.indexOf('<cols') >= 0 ? '<cols' : '<sheetData';
+    xml = xml.replace(at, '<sheetFormatPr defaultRowHeight="15" outlineLevelRow="1"/>' + at);
+    ent.content = new TextEncoder().encode(xml); ent.size = ent.content.length;
+    return XLSX.CFB.write(zip, { fileType: 'zip', type: 'array', compression: true });
+  } catch (e) { console.error(e); return data; }
+}
 function exportXlsx(t, name) {
   const ws = {};
   const all = [t.cols, ...t.rows];
@@ -1627,7 +1702,11 @@ function exportXlsx(t, name) {
   }));
   ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: Math.max(0, all.length - 1), c: Math.max(0, t.cols.length - 1) } });
   ws['!cols'] = widths.map((w) => ({ wch: w }));
-  ws['!autofilter'] = { ref: ws['!ref'] };
+  if (t.rows.some((r) => r.kind)) {
+    // 부분합: 데이터 행은 수준 1로 묶어 엑셀 왼쪽 +/− 로 접기. 소계·총합계 줄은 바깥
+    ws['!rows'] = [{}, ...t.rows.map((r) => (r.kind ? {} : { level: 1 }))];
+    ws['!outline'] = { above: false };
+  } else ws['!autofilter'] = { ref: ws['!ref'] };
   const wb = XLSX.utils.book_new();
   const sheetName = safeName(S.sheet || '결과').replace(/[\[\]]/g, '_').slice(0, 31);
   XLSX.utils.book_append_sheet(wb, ws, sheetName === '가이드' ? '결과' : sheetName);
@@ -1637,7 +1716,8 @@ function exportXlsx(t, name) {
     gs['!cols'] = [{ wch: 14 }, { wch: 70 }];
     XLSX.utils.book_append_sheet(wb, gs, '가이드');
   }
-  const data = XLSX.write(wb, { bookType: 'xlsx', type: 'array', compression: true });
+  let data = XLSX.write(wb, { bookType: 'xlsx', type: 'array', compression: true });
+  if (ws['!rows']) data = addOutlineLevel(data);
   download(new Blob([data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `${name}.xlsx`);
 }
 function exportCsv(t, name) {
