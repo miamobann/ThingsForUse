@@ -185,6 +185,19 @@ input[type=text]:focus, input[type=number]:focus, select:focus { border-color: v
 .badge.none { background: var(--surface-2); color: var(--text-3); }
 .badge.manual { background: var(--accent-soft); color: var(--accent-text); }
 
+/* 피벗 안내 */
+.pv-guide { background: var(--surface-2); border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+.pv-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 11.5px; color: var(--text-2); }
+.pv-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 4px; vertical-align: -1px; }
+.pv-legend i.pv-r, .pv-demo .pv-r { background: var(--hdr-soft); }
+.pv-legend i.pv-c, .pv-demo .pv-c { background: color-mix(in srgb, var(--ok) 16%, transparent); }
+.pv-legend i.pv-v, .pv-demo .pv-v { background: var(--warn-soft); }
+.pv-demo { border-collapse: collapse; font-size: 11.5px; width: 100%; table-layout: fixed; }
+.pv-demo th, .pv-demo td { border: 1px solid var(--line-2); padding: 3px 6px; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pv-demo .pv-r { text-align: left; font-weight: 600; }
+.pv-demo .pv-v { color: var(--warn); }
+.pv-demo .pv-t { background: var(--surface); color: var(--text-3); font-weight: 600; }
+
 /* 단계 추가 메뉴 */
 .add-row { display: flex; gap: 6px; margin-top: 10px; }
 .add-row .btn:first-child { flex: 1; }

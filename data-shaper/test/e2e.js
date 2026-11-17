@@ -45,6 +45,20 @@ const SHOT = process.env.SHOT_DIR || path.join(__dirname, 'shots');
   console.log('가공 결과', JSON.stringify(r1));
   await page.screenshot({ path: `${SHOT}/3-steps.png` });
 
+  // 피벗: 행=부서, 열=시도, 값=상반기 매출 합계
+  await page.evaluate(() => {
+    const sh = cur(); sh.steps.splice(3);
+    sh.steps.push({ type: 'pivot', on: true, open: true, rows: ['부서'], col: '시도', val: '상반기 매출', fn: 'sum', totals: true, zero: false });
+    sh.steps[2].on = false; refresh(true);
+  });
+  console.log('피벗', JSON.stringify(await page.evaluate(() => ({ out: S.out, info: S.stepInfo.at(-1) }))));
+  await page.screenshot({ path: `${SHOT}/3b-pivot.png` });
+  {
+    const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#btnDown')]);
+    await dl.saveAs(`${SHOT}/pivot.xlsx`);
+  }
+  await page.evaluate(() => { cur().steps.pop(); cur().steps[2].on = true; refresh(true); });
+
   // 템플릿: 집계 끄고 템플릿 연결
   await page.evaluate(() => { cur().steps.splice(3); refresh(true); });
   await page.setInputFiles('#tplIn', file(`${SAMPLE}/가짜_템플릿.xlsx`));

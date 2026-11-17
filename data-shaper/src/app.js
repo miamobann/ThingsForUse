@@ -30,9 +30,10 @@ function isEmpty(v) {
 }
 function pad(n, w = 2) { return String(n).padStart(w, '0'); }
 function hasTime(d) { return d.getHours() || d.getMinutes() || d.getSeconds(); }
-function fmtDate(d, f = 'YYYY-MM-DD') {
+function fmtDate(d, f = 'auto') {
   const y = d.getFullYear(), m = d.getMonth() + 1, day = d.getDate();
   switch (f) {
+    case 'YYYY-MM-DD': return `${y}-${pad(m)}-${pad(day)}`;
     case 'YYYY.MM.DD': return `${y}.${pad(m)}.${pad(day)}`;
     case 'YYYY/MM/DD': return `${y}/${pad(m)}/${pad(day)}`;
     case 'YYYYMMDD': return `${y}${pad(m)}${pad(day)}`;
@@ -410,6 +411,22 @@ function evalExpr(n, get) {
   }
 }
 
+function aggregate(rows, i, fn) {
+  if (fn === 'rows') return rows.length;
+  const vs = rows.map((r) => r[i]).filter((v) => !isEmpty(v));
+  if (fn === 'count') return vs.length;
+  if (fn === 'distinct') return new Set(vs.map(str)).size;
+  if (fn === 'min' || fn === 'max') {
+    if (!vs.length) return null;
+    let m = vs[0]; for (const v of vs) { const c = cmp(v, m); if (fn === 'min' ? c < 0 : c > 0) m = v; } return m;
+  }
+  const ns = vs.map((v) => toNum(v)).filter((v) => v != null);
+  const sum = ns.reduce((x, y) => x + y, 0);
+  if (fn === 'sum') return +sum.toPrecision(15);
+  return ns.length ? +(sum / ns.length).toPrecision(15) : null;
+}
+const PIVOT_MAX_COLS = 200;
+
 const AGG_FNS = [['sum', '합계'], ['count', '개수'], ['rows', '행 수'], ['avg', '평균'], ['min', '최소'], ['max', '최대'], ['distinct', '고유 개수']];
 const DATE_FMTS = [['date', '엑셀 날짜 값'], ['YYYY-MM-DD', '2026-01-05'], ['YYYY.MM.DD', '2026.01.05'], ['YYYY/MM/DD', '2026/01/05'], ['YYYYMMDD', '20260105'], ['YYYY-MM', '2026-01'], ['KR', '2026년 1월 5일']];
 const VAL_ACTIONS = [['trim', '앞뒤 공백 정리'], ['number', '숫자로 바꾸기'], ['date', '날짜 형식 맞추기'], ['replace', '값 치환'], ['fill', '빈 칸 채우기']];
@@ -598,24 +615,56 @@ const STEP_DEFS = {
       const rows = [];
       for (const g of groups.values()) {
         const out = g.keyVals.slice();
-        for (const a of ags) {
-          if (a.fn === 'rows') { out.push(g.rows.length); continue; }
-          const vs = g.rows.map((r) => r[a.i]).filter((v) => !isEmpty(v));
-          if (a.fn === 'count') { out.push(vs.length); continue; }
-          if (a.fn === 'distinct') { out.push(new Set(vs.map(str)).size); continue; }
-          if (a.fn === 'min' || a.fn === 'max') {
-            if (!vs.length) { out.push(null); continue; }
-            let m = vs[0]; for (const v of vs) { const c = cmp(v, m); if (a.fn === 'min' ? c < 0 : c > 0) m = v; } out.push(m); continue;
-          }
-          const ns = vs.map((v) => toNum(v)).filter((v) => v != null);
-          const sum = ns.reduce((x, y) => x + y, 0);
-          out.push(a.fn === 'sum' ? +sum.toPrecision(15) : ns.length ? +(sum / ns.length).toPrecision(15) : null);
-        }
+        for (const a of ags) out.push(aggregate(g.rows, a.i, a.fn));
         rows.push(out);
       }
       return { cols: names, rows };
     },
     summary: (st) => `${st.by.length ? st.by.join(', ') + '별' : '전체'} · ${st.aggs.map((a) => a.fn === 'rows' ? '행 수' : `${a.col || '?'} ${fnLabel(a.fn)}`).join(', ')}`,
+  },
+  pivot: {
+    label: '피벗', icon: '⊞', desc: '행×열 교차표',
+    init: (cols) => ({ rows: cols[0] ? [cols[0]] : [], col: cols[1] || '', val: cols[2] || '', fn: 'sum', totals: true, zero: false }),
+    apply(t, st) {
+      if (!st.col) throw new Error('열 기준을 골라야 함');
+      const ri = st.rows.map((c) => ci(t, c));
+      const cix = ci(t, st.col);
+      const vi = st.fn === 'rows' ? -1 : ci(t, st.val);
+      // 열 기준 값 목록 (정렬)
+      const keyOf = (v) => (isEmpty(v) ? '' : str(v));
+      const colVals = new Map();
+      for (const r of t.rows) { const k = keyOf(r[cix]); if (!colVals.has(k)) colVals.set(k, r[cix]); }
+      let keys = [...colVals.keys()].sort((a, b) => cmp(colVals.get(a), colVals.get(b)));
+      let warn = null;
+      if (keys.length > PIVOT_MAX_COLS) { warn = `열 기준 값이 ${keys.length}개라 앞 ${PIVOT_MAX_COLS}개만 사용`; keys = keys.slice(0, PIVOT_MAX_COLS); }
+      const groups = new Map();
+      for (const r of t.rows) {
+        const gk = JSON.stringify(ri.map((i) => str(r[i])));
+        let g = groups.get(gk); if (!g) { g = { keyVals: ri.map((i) => r[i]), all: [], by: new Map() }; groups.set(gk, g); }
+        g.all.push(r);
+        const ck = keyOf(r[cix]); if (!g.by.has(ck)) g.by.set(ck, []); g.by.get(ck).push(r);
+      }
+      const empty = st.zero && ['sum', 'count', 'rows', 'distinct'].includes(st.fn) ? 0 : null;
+      const names = [...st.rows];
+      keys.forEach((k) => names.push(uniqName(names, k === '' ? '(빈 값)' : k)));
+      if (st.totals) names.push(uniqName(names, '합계'));
+      const rows = [];
+      for (const g of groups.values()) {
+        const out = g.keyVals.slice();
+        for (const k of keys) { const rs = g.by.get(k); out.push(rs ? aggregate(rs, vi, st.fn) : empty); }
+        if (st.totals) out.push(aggregate(g.all, vi, st.fn));
+        rows.push(out);
+      }
+      // 행 기준이 없으면 결과가 한 줄뿐이라 합계 줄은 생략
+      if (st.totals && rows.length && st.rows.length) {
+        const tot = st.rows.map((_, k) => (k === 0 ? '합계' : null));
+        for (const k of keys) tot.push(aggregate(t.rows.filter((r) => keyOf(r[cix]) === k), vi, st.fn));
+        tot.push(aggregate(t.rows, vi, st.fn));
+        rows.push(tot);
+      }
+      return { cols: names, rows, warn };
+    },
+    summary: (st) => `행 ${st.rows.join(', ') || '없음'} · 열 ${st.col || '?'} · ${st.fn === 'rows' ? '행 수' : `${st.val || '?'} ${fnLabel(st.fn)}`}`,
   },
   template: {
     label: '템플릿 맞추기', icon: '▤', desc: '템플릿 머리글 순서대로', hidden: true,
@@ -876,6 +925,22 @@ function stepBody(st, cols, idx) {
       out.push(h('button', { class: 'btn ghost sm sub-add', onclick: C(() => st.aggs.push({ col: cols[0] || '', fn: 'sum', name: '' })) }, '＋ 값 추가'));
       return out;
     }
+    case 'pivot': {
+      const fnOpts = AGG_FNS;
+      const out = [
+        pivotGuide(st, idx),
+        h('div', { class: 'lbl' }, '① 행 기준: 표 왼쪽에 세로로 나열할 열'), multiCols(cols, st.rows, () => changed(true)),
+        h('div', { class: 'lbl' }, '② 열 기준: 값마다 새 열이 생기는 열'), colSelect(cols, st.col, (v) => { st.col = v; changed(true); }, '열 선택'),
+        h('div', { class: 'lbl' }, '③ 값: 칸에 들어갈 계산'),
+        h('div', { class: 'row' },
+          st.fn === 'rows' ? h('span', { class: 'muted', title: '행 수는 열을 고를 필요 없음' }, '—') : colSelect(cols, st.val, (v) => { st.val = v; changed(true); }, '열 선택'),
+          select(fnOpts, st.fn, (v) => { st.fn = v; changed(true); })),
+        h('label', { class: 'tgl' }, h('input', { type: 'checkbox', checked: st.totals, onchange: (e) => { st.totals = e.target.checked; changed(true); } }), h('span', null, '합계 행·열 넣기')),
+        h('label', { class: 'tgl' }, h('input', { type: 'checkbox', checked: st.zero, onchange: (e) => { st.zero = e.target.checked; changed(true); } }), h('span', null, '해당 없는 칸은 0으로 (끄면 빈 칸)')),
+        h('div', { class: 'hint' }, '엑셀로 내려받으면 어떻게 만든 표인지 적은 "가이드" 시트가 같이 들어감'),
+      ];
+      return out;
+    }
     case 'template': {
       const out = [h('div', { class: 'hint' }, '왼쪽은 템플릿 머리글, 오른쪽은 연결할 열. 결과는 템플릿 순서대로 나감')];
       st.targets.forEach((x) => out.push(h('div', { class: 'map-item' },
@@ -886,6 +951,69 @@ function stepBody(st, cols, idx) {
     }
   }
   return [];
+}
+
+// 피벗 설정을 실제 열 이름·값으로 보여주는 작은 예시 표
+function pivotGuide(st, idx) {
+  const info = S.stepInfo[idx] || {};
+  const inT = pipelineInput(idx);
+  const rowName = st.rows.length ? st.rows.join(' · ') : '(행 기준 없음)';
+  const valName = st.fn === 'rows' ? '행 수' : `${st.val || '값'} ${fnLabel(st.fn)}`;
+  let colSamples = ['값1', '값2'], rowSamples = ['항목1', '항목2'];
+  if (inT) {
+    const ci2 = inT.cols.indexOf(st.col);
+    if (ci2 >= 0) { const u = [...new Set(inT.rows.map((r) => str(r[ci2])).filter(Boolean))].sort(collator.compare); if (u.length) colSamples = u.slice(0, 2).concat(u.length > 2 ? ['…'] : []); }
+    const ri2 = st.rows.length ? inT.cols.indexOf(st.rows[0]) : -1;
+    if (ri2 >= 0) { const u = [...new Set(inT.rows.map((r) => str(r[ri2])).filter(Boolean))]; if (u.length) rowSamples = u.slice(0, 2).concat(u.length > 2 ? ['…'] : []); }
+  }
+  const tbl = h('table', { class: 'pv-demo' });
+  const head = h('tr', null, h('th', { class: 'pv-r' }, rowName), ...colSamples.map((c) => h('th', { class: 'pv-c' }, c)), st.totals ? h('th', { class: 'pv-t' }, '합계') : null);
+  tbl.append(head);
+  rowSamples.forEach((r) => tbl.append(h('tr', null, h('td', { class: 'pv-r' }, r), ...colSamples.map((c) => h('td', { class: 'pv-v' }, c === '…' ? '' : '■')), st.totals ? h('td', { class: 'pv-t' }, 'Σ') : null)));
+  if (st.totals) tbl.append(h('tr', null, h('td', { class: 'pv-t' }, '합계'), ...colSamples.map(() => h('td', { class: 'pv-t' }, 'Σ')), h('td', { class: 'pv-t' }, 'Σ')));
+  return h('div', { class: 'pv-guide' },
+    h('div', { class: 'pv-legend' },
+      h('span', null, h('i', { class: 'pv-r' }), '① 행 기준'), h('span', null, h('i', { class: 'pv-c' }), `② 열 기준: ${st.col || '?'}`), h('span', null, h('i', { class: 'pv-v' }), `③ 값: ${valName}`)),
+    tbl,
+    h('div', { class: 'hint' }, `■ 한 칸 = 행(${rowName}) × 열(${st.col || '?'})에 해당하는 원본 행들의 ${valName}`));
+}
+function pipelineInput(idx) {
+  // idx번째 단계에 들어가는 표 (예시 값 뽑기용)
+  const sh = cur(); if (!sh || !S.base) return null;
+  let t = { cols: S.base.cols, rows: S.base.rows };
+  for (let i = 0; i < idx; i++) {
+    const st = sh.steps[i]; if (st.on === false) continue;
+    try { const r = STEP_DEFS[st.type].apply(t, st); t = { cols: r.cols, rows: r.rows }; } catch (e) { /* 오류 단계는 건너뜀 */ }
+  }
+  return t;
+}
+function guideRows() {
+  const sh = cur();
+  const piv = sh.steps.filter((s) => s.type === 'pivot' && s.on !== false);
+  if (!piv.length) return null;
+  const p = piv[piv.length - 1];
+  const valName = p.fn === 'rows' ? '행 수' : `${p.val} ${fnLabel(p.fn)}`;
+  const rows = [
+    ['가이드', ''],
+    ['', ''],
+    ['원본 파일', S.fileName],
+    ['원본 시트', S.sheet],
+    ['만든 시각', (() => { const d = new Date(); return `${fmtDate(d, 'YYYY-MM-DD')} ${pad(d.getHours())}:${pad(d.getMinutes())}`; })()],
+    ['결과 크기', `${S.out.rows.length}행 × ${S.out.cols.length}열`],
+    ['', ''],
+    ['피벗 읽는 법', ''],
+    ['행 기준', p.rows.length ? p.rows.join(', ') : '(없음: 전체 한 줄)'],
+    ['열 기준', `${p.col} (값마다 열 하나)`],
+    ['칸 값', valName],
+    ['한 칸의 뜻', `행(${p.rows.join('·') || '전체'}) × 열(${p.col})에 해당하는 원본 행들의 ${valName}`],
+    ['합계 행·열', p.totals ? '있음 (맨 아래 줄, 맨 오른쪽 열)' : '없음'],
+    ['빈 칸', p.zero ? '해당 행 없으면 0' : '해당 행 없으면 빈 칸'],
+    ['', ''],
+    ['가공 순서', ''],
+    ['원본 읽기', `머리글 ${sh.read.headerStart + 1}번째 줄부터 ${sh.read.headerRows}줄${sh.read.dropSubtotals ? ', 소계·합계 줄 제외' : ''}${sh.read.fillMerges ? ', 병합 셀 채움' : ''}`],
+  ];
+  sh.steps.forEach((st) => { if (st.on !== false) rows.push([STEP_DEFS[st.type].label, STEP_DEFS[st.type].summary(st)]); });
+  return rows;
 }
 
 function renderSteps() {
@@ -1106,7 +1234,14 @@ function exportXlsx(t, name) {
   ws['!cols'] = widths.map((w) => ({ wch: w }));
   ws['!autofilter'] = { ref: ws['!ref'] };
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, safeName(S.sheet || '결과').replace(/[\[\]]/g, '_').slice(0, 31));
+  const sheetName = safeName(S.sheet || '결과').replace(/[\[\]]/g, '_').slice(0, 31);
+  XLSX.utils.book_append_sheet(wb, ws, sheetName === '가이드' ? '결과' : sheetName);
+  const g = guideRows();
+  if (g) {
+    const gs = XLSX.utils.aoa_to_sheet(g);
+    gs['!cols'] = [{ wch: 14 }, { wch: 70 }];
+    XLSX.utils.book_append_sheet(wb, gs, '가이드');
+  }
   const data = XLSX.write(wb, { bookType: 'xlsx', type: 'array', compression: true });
   download(new Blob([data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `${name}.xlsx`);
 }
@@ -1120,8 +1255,10 @@ function doDownload() {
   if (!S.out) return;
   runPipeline();
   const name = safeName($('outName').value);
-  if ($('outFmt').value === 'csv') exportCsv(S.out, name); else exportXlsx(S.out, name);
-  toast(`${S.out.rows.length.toLocaleString()}행 내려받기 완료`);
+  const csv = $('outFmt').value === 'csv';
+  if (csv) exportCsv(S.out, name); else exportXlsx(S.out, name);
+  const hasGuide = !!guideRows();
+  toast(`${S.out.rows.length.toLocaleString()}행 내려받기 완료${hasGuide ? (csv ? ' (CSV는 시트가 하나라 가이드 시트는 빠짐. 엑셀로 받으면 포함)' : ' · 가이드 시트 포함') : ''}`);
 }
 
 // ───────────────────────── 규칙 저장·불러오기 ─────────────────────────
