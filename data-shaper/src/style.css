@@ -1,4 +1,5 @@
 :root {
+  color-scheme: light;
   --bg: #f6f7f9;
   --surface: #ffffff;
   --surface-2: #f1f3f6;
@@ -23,6 +24,7 @@
 }
 @media (prefers-color-scheme: dark) {
   :root {
+    color-scheme: dark;
     --bg: #14171c;
     --surface: #1b1f26;
     --surface-2: #222731;
@@ -52,6 +54,8 @@ body {
   display: flex; flex-direction: column; overflow: hidden;
 }
 button, input, select { font: inherit; color: inherit; }
+/* 다크 모드에서 드롭다운 목록 글씨 안 보이는 문제 */
+select option { background: var(--surface); color: var(--text); }
 [hidden] { display: none !important; }
 .muted { color: var(--text-3); }
 

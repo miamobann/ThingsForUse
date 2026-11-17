@@ -8,6 +8,7 @@
 <meta name="referrer" content="no-referrer">
 <title>데이터 가공</title>
 <style>:root {
+  color-scheme: light;
   --bg: #f6f7f9;
   --surface: #ffffff;
   --surface-2: #f1f3f6;
@@ -32,6 +33,7 @@
 }
 @media (prefers-color-scheme: dark) {
   :root {
+    color-scheme: dark;
     --bg: #14171c;
     --surface: #1b1f26;
     --surface-2: #222731;
@@ -61,6 +63,8 @@ body {
   display: flex; flex-direction: column; overflow: hidden;
 }
 button, input, select { font: inherit; color: inherit; }
+/* 다크 모드에서 드롭다운 목록 글씨 안 보이는 문제 */
+select option { background: var(--surface); color: var(--text); }
 [hidden] { display: none !important; }
 .muted { color: var(--text-3); }
 
@@ -324,8 +328,9 @@ table.grid { border-collapse: separate; border-spacing: 0; font-size: 12.5px; }
     <section class="panel" id="panelSteps" hidden>
       <div class="panel-h"><span class="num">3</span>가공 단계
         <div class="panel-actions">
-          <button class="btn ghost sm" id="btnSaveRule" title="지금 단계들을 규칙 파일(.json)로 저장">규칙 저장</button>
-          <button class="btn ghost sm" id="btnLoadRule" title="저장해 둔 규칙 파일 불러오기">불러오기</button>
+          <button class="btn ghost sm" id="btnSaveRule" title="브라우저에 저장된 규칙 전체를 JSON 파일로 내보내기">내보내기</button>
+          <button class="btn ghost sm" id="btnLoadRule" title="내보낸 JSON 파일을 브라우저에 가져오기">가져오기</button>
+          <button class="btn ghost sm" id="btnResetRule" title="이 시트의 단계·읽기 설정을 처음 상태로">초기화</button>
         </div>
       </div>
       <div id="steps" class="steps"></div>
@@ -1206,6 +1211,7 @@ function changed(full) {
 }
 function refresh(full) {
   runPipeline();
+  autoSave();
   if (full) renderSteps(); else updateStepMeta();
   renderReadInfo();
   renderView();
@@ -1501,6 +1507,7 @@ function renderReadInfo() {
 }
 function selectSheet(sn) {
   S.sheet = sn;
+  if (autoLoad(sn)) toast('저장된 규칙 적용');
   renderFile(); renderRead();
   refresh(true);
   updateOutName();
@@ -1649,37 +1656,112 @@ function doDownload() {
   toast(`${S.out.rows.length.toLocaleString()}행 내려받기 완료${hasGuide ? (csv ? ' (CSV는 시트가 하나라 가이드 시트는 빠짐. 엑셀로 받으면 포함)' : ' · 가이드 시트 포함') : ''}`);
 }
 
-// ───────────────────────── 규칙 저장·불러오기 ─────────────────────────
-function saveRule() {
-  const sh = cur(); if (!sh) return;
-  const rule = {
-    app: RULE_APP, version: RULE_VERSION, sheet: S.sheet, savedAt: new Date().toISOString(),
+// ───────────────────────── 규칙: 브라우저 저장소 자동 저장 + JSON 내보내기·가져오기 ─────────────────────────
+// 저장 위치: 이 PC 크롬의 localStorage. 서버 전송 없음.
+const STORE_KEY = 'data-shaper:rules';
+const GENERIC_SHEET = /^(sheet|시트)\s*\d*$|^csv$/i;
+
+// 시트 이름이 Sheet1·CSV처럼 흔하면 파일 이름(숫자 뺀 것)으로 구분
+function ruleKey(sheet = S.sheet) {
+  if (!GENERIC_SHEET.test(String(sheet).trim())) return `sheet:${sheet}`;
+  const stem = S.fileName.replace(/\.[^.]+$/, '').replace(/[\d\s_\-.()]+/g, '') || S.fileName;
+  return `file:${stem}`;
+}
+function readStore() {
+  try { const v = JSON.parse(localStorage.getItem(STORE_KEY) || '{}'); return v && typeof v === 'object' ? v : {}; }
+  catch (e) { return {}; }
+}
+function writeStore(all) {
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(all)); return true; }
+  catch (e) { return false; }
+}
+function currentRule() {
+  const sh = cur();
+  return {
+    sheet: S.sheet,
+    savedAt: new Date().toISOString(),
     read: { ...sh.read },
     steps: sh.steps.map(({ open, ...rest }) => rest),
     output: { format: $('outFmt').value },
   };
-  const base = safeName(`규칙_${S.fileName.replace(/\.[^.]+$/, '')}_${S.sheet}`);
-  download(new Blob([JSON.stringify(rule, null, 2)], { type: 'application/json' }), `${base}.json`);
-  toast('규칙 저장 완료. 다음에 불러오기로 같은 가공을 바로 적용');
 }
-async function loadRule(file) {
-  let rule;
-  try { rule = JSON.parse(await file.text()); } catch (e) { toast('규칙 파일을 읽지 못함 (JSON 형식 아님)', true); return; }
-  if (!rule || rule.app !== RULE_APP || !Array.isArray(rule.steps)) { toast('이 도구에서 저장한 규칙 파일이 아님', true); return; }
-  const bad = rule.steps.find((s) => !STEP_DEFS[s.type]);
-  if (bad) { toast(`모르는 단계 종류: ${bad.type}`, true); return; }
-  let target = S.sheet;
-  if (rule.sheet && S.sheets[rule.sheet]) target = rule.sheet;
-  const sh = S.sheets[target];
+let autoSaveTimer;
+function autoSave() {
+  if (!S.wb || !cur()) return;
+  clearTimeout(autoSaveTimer);
+  autoSaveTimer = setTimeout(() => {
+    const all = readStore();
+    const key = ruleKey();
+    // 단계가 없고 기본 읽기 설정이면 저장할 필요 없음
+    if (!cur().steps.length && !all[key]) return;
+    all[key] = currentRule();
+    if (!writeStore(all)) toast('브라우저 저장소에 저장 못 함 (저장소가 막혀 있음). 내보내기로 따로 보관 필요', true);
+  }, 400);
+}
+function validRule(r) {
+  return r && Array.isArray(r.steps) && r.steps.every((s) => s && STEP_DEFS[s.type]);
+}
+function applyRule(sh, rule) {
   if (rule.read) Object.assign(sh.read, rule.read);
   sh.steps = rule.steps.map((s) => ({ ...s, open: false }));
   sh.toggled = new Set();
   if (rule.output && rule.output.format) $('outFmt').value = rule.output.format;
-  S.sheet = target;
-  renderFile(); renderRead(); refresh(true); updateOutName();
-  const errs = S.stepInfo.filter((x) => x.error).length;
-  const note = rule.sheet && rule.sheet !== target ? ` ('${rule.sheet}' 시트가 없어 지금 시트에 적용)` : '';
-  toast(errs ? `규칙 적용. 맞지 않는 단계 ${errs}개는 건너뜀${note}` : `규칙 적용 완료${note}`, !!errs);
+}
+// 시트를 처음 열 때 저장된 규칙 자동 적용
+function autoLoad(sn) {
+  const sh = S.sheets[sn];
+  if (!sh || sh.autoLoaded) return false;
+  sh.autoLoaded = true;
+  const rule = readStore()[ruleKey(sn)];
+  if (!validRule(rule)) return false;
+  applyRule(sh, rule);
+  return true;
+}
+function exportRules() {
+  autoSave();
+  clearTimeout(autoSaveTimer);
+  const all = readStore();
+  if (S.wb && cur() && (cur().steps.length || all[ruleKey()])) all[ruleKey()] = currentRule();
+  const n = Object.keys(all).length;
+  if (!n) { toast('저장된 규칙이 없음', true); return; }
+  const data = { app: RULE_APP, version: 2, exportedAt: new Date().toISOString(), rules: all };
+  const d = new Date();
+  download(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }), `data-shaper_규칙_${fmtDate(d, 'YYYYMMDD')}.json`);
+  toast(`규칙 ${n}개 내보내기 완료`);
+}
+async function importRules(file) {
+  let data;
+  try { data = JSON.parse(await file.text()); } catch (e) { toast('규칙 파일을 읽지 못함 (JSON 형식 아님)', true); return; }
+  if (!data || data.app !== RULE_APP) { toast('이 도구에서 내보낸 규칙 파일이 아님', true); return; }
+  // version 2: 여러 규칙 묶음, version 1: 시트 하나 규칙
+  let incoming = {};
+  if (data.rules && typeof data.rules === 'object') incoming = data.rules;
+  else if (validRule(data)) incoming[S.wb ? ruleKey(data.sheet || S.sheet) : `sheet:${data.sheet}`] = data;
+  const ok = Object.entries(incoming).filter(([, r]) => validRule(r));
+  if (!ok.length) { toast('가져올 수 있는 규칙이 없음', true); return; }
+  const all = readStore();
+  ok.forEach(([k, r]) => { all[k] = r; });
+  const saved = writeStore(all);
+  // 지금 열린 파일에 맞는 규칙이 있으면 바로 적용
+  let applied = 0;
+  if (S.wb) {
+    for (const sn of S.wb.SheetNames) {
+      const r = all[ruleKey(sn)];
+      if (ok.some(([k]) => k === ruleKey(sn)) && validRule(r)) { applyRule(S.sheets[sn], r); applied++; }
+    }
+    renderFile(); renderRead(); refresh(true);
+  }
+  const msg = `규칙 ${ok.length}개 가져옴${applied ? ` · 지금 파일 시트 ${applied}개에 적용` : ''}`;
+  toast(saved ? msg : `${msg} (브라우저 저장소가 막혀 이번 창에서만 유지)`, !saved);
+}
+function resetRule() {
+  const sh = cur(); if (!sh) return;
+  sh.steps = []; sh.toggled = new Set();
+  const d = detectHeader(sh.grid, sh.merges);
+  sh.read = { headerStart: d.headerStart, headerRows: d.headerRows, fillMerges: true, dropSubtotals: true };
+  const all = readStore(); delete all[ruleKey()]; writeStore(all);
+  renderRead(); refresh(true);
+  toast('이 시트 규칙 초기화');
 }
 
 // ───────────────────────── 파일 열기 ─────────────────────────
@@ -1701,8 +1783,9 @@ async function openFile(file) {
     $('toolbar').hidden = false;
     $('panelRead').hidden = false;
     $('panelSteps').hidden = false;
+    const loaded = autoLoad(S.sheet);
     renderFile(); renderRead(); refresh(true); updateOutName();
-    toast(`${file.name} 읽음 · 시트 ${wb.SheetNames.length}개`);
+    toast(`${file.name} 읽음 · 시트 ${wb.SheetNames.length}개${loaded ? ' · 저장된 규칙 적용' : ''}`);
   } catch (e) {
     console.error(e);
     toast(`파일을 읽지 못함: ${e.message || e}`, true);
@@ -1714,10 +1797,12 @@ function bind() {
   $('btnPick').onclick = () => $('fileIn').click();
   $('fileIn').onchange = (e) => { openFile(e.target.files[0]); e.target.value = ''; };
   $('tplIn').onchange = async (e) => { const f = e.target.files[0]; e.target.value = ''; if (!f) return; try { await loadTemplate(f); } catch (err) { toast(err.message, true); } };
-  $('ruleIn').onchange = (e) => { const f = e.target.files[0]; e.target.value = ''; if (f) loadRule(f); };
+  $('ruleIn').onchange = (e) => { const f = e.target.files[0]; e.target.value = ''; if (f) importRules(f); };
   $('btnTemplate').onclick = () => $('tplIn').click();
-  $('btnSaveRule').onclick = saveRule;
+  $('btnSaveRule').onclick = exportRules;
   $('btnLoadRule').onclick = () => $('ruleIn').click();
+  $('btnResetRule').onclick = resetRule;
+  $('outFmt').addEventListener('change', autoSave);
   $('btnAdd').onclick = () => { const m = $('addMenu'); m.hidden = !m.hidden; };
   $('btnDown').onclick = doDownload;
   document.querySelectorAll('.tab').forEach((b) => { b.onclick = () => { S.view = b.dataset.view; renderView(); }; });
@@ -1757,7 +1842,7 @@ function bind() {
     e.preventDefault(); depth = 0; document.body.classList.remove('dragging');
     const f = e.dataTransfer.files[0];
     if (!f) return;
-    if (/\.json$/i.test(f.name)) { if (S.wb) loadRule(f); else toast('규칙은 데이터 파일을 먼저 연 뒤 불러와야 함', true); return; }
+    if (/\.json$/i.test(f.name)) { importRules(f); return; }
     openFile(f);
   });
   renderAddMenu();

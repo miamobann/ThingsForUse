@@ -94,10 +94,24 @@ const SHOT = process.env.SHOT_DIR || path.join(__dirname, 'shots');
   console.log('직원', JSON.stringify(await page.evaluate(() => ({ read: cur().read, cols: S.out.cols, n: S.out.rows.length, r: S.out.rows.slice(0, 4), info: S.stepInfo.map((x) => x.error || x.warn) }))));
   await page.screenshot({ path: `${SHOT}/5-emp.png` });
 
+  // 자동 저장·자동 불러오기: 같은 파일 다시 열면 단계 복원
+  const before = await page.evaluate(() => S.sheets['매출'].steps.length);
+  await page.waitForTimeout(600);
+  await page.setInputFiles('#fileIn', file(`${SAMPLE}/가짜_매출_직원.xlsx`));
+  await page.waitForTimeout(400);
+  console.log('자동 불러오기', before, '→', await page.evaluate(() => cur().steps.length), await page.evaluate(() => Object.keys(JSON.parse(localStorage.getItem('data-shaper:rules') || '{}'))));
+
   // CP949 CSV
   await page.setInputFiles('#fileIn', file(`${SAMPLE}/가짜_직원_cp949.csv`));
   await page.waitForTimeout(300);
   console.log('CSV', JSON.stringify(await page.evaluate(() => ({ cols: S.base.cols, r: S.base.rows.slice(0, 2) }))));
+
+  // 다크 모드
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await page.setInputFiles('#fileIn', file(`${SAMPLE}/가짜_매출_직원.xlsx`));
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: `${SHOT}/6-dark.png` });
+  console.log('다크 select 색', await page.evaluate(() => { const o = document.querySelector('#outFmt option'); const cs = getComputedStyle(o); return [cs.color, cs.backgroundColor, getComputedStyle(document.documentElement).colorScheme]; }));
 
   console.log('페이지 오류', errors.length ? errors : '없음');
   console.log('외부 네트워크 요청', net.length ? net : '0건');
