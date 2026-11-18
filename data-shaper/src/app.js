@@ -353,7 +353,44 @@ function eqVal(v, q) {
   return str(v).trim() === q;
 }
 
-// 계산식: 숫자, [열 이름], + - * / ( ), ROUND(x[,n]) ABS(x)
+// 계산식 (엑셀식): [열 이름], "글자", 숫자, TRUE/FALSE
+// 연산: 비교(= <> < > <= >=) < & < + - < * / < 단항 -
+// 함수 목록은 FORMULA_FNS. 코드 실행(eval) 없음, 직접 해석
+class CalcErr extends Error {}
+const FORMULA_FNS = {
+  // 글자
+  LEFT: [1, 2, '앞 N글자', 'LEFT([사번], 2)'],
+  RIGHT: [1, 2, '뒤 N글자', 'RIGHT([전화번호], 4)'],
+  MID: [3, 3, '시작 위치부터 N글자', 'MID([사번], 3, 2)'],
+  LEN: [1, 1, '글자 수', 'LEN([이름])'],
+  TRIM: [1, 1, '앞뒤·중복 공백 정리', 'TRIM([업체명])'],
+  SUBSTITUTE: [3, 3, '글자 바꾸기', 'SUBSTITUTE([전화번호], "-", "")'],
+  UPPER: [1, 1, '영문 대문자로', 'UPPER([코드])'],
+  LOWER: [1, 1, '영문 소문자로', 'LOWER([이메일])'],
+  TEXTBEFORE: [2, 2, '특정 글자 앞부분', 'TEXTBEFORE([이메일], "@")'],
+  TEXTAFTER: [2, 2, '특정 글자 뒷부분', 'TEXTAFTER([이메일], "@")'],
+  DIGITS: [1, 1, '숫자만 남기기 (엑셀에 없음)', 'DIGITS([전화번호])'],
+  REGEXEXTRACT: [2, 2, '정규식에 맞는 부분 (고급)', 'REGEXEXTRACT([주소], "\\d{5}")'],
+  // 숫자
+  VALUE: [1, 1, '글자를 숫자로', 'VALUE([금액])'],
+  ROUND: [1, 2, '반올림 (자릿수)', 'ROUND([금액] / 3, 0)'],
+  ROUNDUP: [1, 2, '올림', 'ROUNDUP([금액] / 1000, 0)'],
+  ROUNDDOWN: [1, 2, '내림', 'ROUNDDOWN([금액] / 1000, 0)'],
+  ABS: [1, 1, '절댓값', 'ABS([차액])'],
+  // 조건
+  IF: [2, 3, '조건에 따라 다른 값', 'IF([금액] >= 100000, "고액", "일반")'],
+  AND: [1, 30, '모두 참', 'AND([부서] = "영업1팀", [금액] > 0)'],
+  OR: [1, 30, '하나라도 참', 'OR([부서] = "영업1팀", [부서] = "영업2팀")'],
+  ISBLANK: [1, 1, '빈 칸인지', 'ISBLANK([이메일])'],
+  IFERROR: [2, 2, '오류면 대신 쓸 값', 'IFERROR(VALUE([금액]), 0)'],
+  // 날짜
+  YEAR: [1, 1, '연도', 'YEAR([입사일])'],
+  MONTH: [1, 1, '월', 'MONTH([입사일])'],
+  DAY: [1, 1, '일', 'DAY([입사일])'],
+  TEXT: [2, 2, '날짜·숫자를 형식에 맞춘 글자로', 'TEXT([입사일], "YYYY-MM")'],
+};
+const LAZY_FNS = new Set(['IF', 'IFERROR', 'AND', 'OR']);
+
 function parseExpr(src) {
   const toks = [];
   let i = 0;
@@ -361,13 +398,30 @@ function parseExpr(src) {
     const ch = src[i];
     if (/\s/.test(ch)) { i++; continue; }
     if (ch === '[') { const j = src.indexOf(']', i); if (j < 0) throw new Error('] 가 빠짐'); toks.push({ t: 'col', v: src.slice(i + 1, j).trim() }); i = j + 1; continue; }
-    if (/[\d.]/.test(ch)) { const m = src.slice(i).match(/^\d*\.?\d+(e[-+]?\d+)?/i); toks.push({ t: 'num', v: parseFloat(m[0]) }); i += m[0].length; continue; }
-    if (/[A-Za-z]/.test(ch)) { const m = src.slice(i).match(/^[A-Za-z]+/); toks.push({ t: 'fn', v: m[0].toUpperCase() }); i += m[0].length; continue; }
-    if ('+-*/(),'.includes(ch)) { toks.push({ t: ch }); i++; continue; }
+    if (ch === '"' || ch === '“' || ch === '”') {
+      // "" 는 따옴표 하나
+      let s = '', j = i + 1, ok = false;
+      while (j < src.length) {
+        const c = src[j];
+        if (c === '"' || c === '”' || c === '“') { if (src[j + 1] === '"') { s += '"'; j += 2; continue; } ok = true; j++; break; }
+        s += c; j++;
+      }
+      if (!ok) throw new Error('따옴표(")가 안 닫힘');
+      toks.push({ t: 'str', v: s }); i = j; continue;
+    }
+    if (/[\d.]/.test(ch)) { const m = src.slice(i).match(/^\d*\.?\d+(e[-+]?\d+)?/i); if (!m) throw new Error(`숫자 형식이 이상함: ${src.slice(i, i + 5)}`); toks.push({ t: 'num', v: parseFloat(m[0]) }); i += m[0].length; continue; }
+    if (/[A-Za-z]/.test(ch)) { const m = src.slice(i).match(/^[A-Za-z][A-Za-z0-9]*/); toks.push({ t: 'fn', v: m[0].toUpperCase() }); i += m[0].length; continue; }
+    const two = src.slice(i, i + 2);
+    if (two === '<>' || two === '<=' || two === '>=' || two === '!=') { toks.push({ t: 'cmp', v: two === '!=' ? '<>' : two }); i += 2; continue; }
+    if (ch === '<' || ch === '>' || ch === '=') { toks.push({ t: 'cmp', v: ch }); i++; continue; }
+    if ('+-*/(),&'.includes(ch)) { toks.push({ t: ch }); i++; continue; }
+    if (ch === ';') { toks.push({ t: ',' }); i++; continue; }
     throw new Error(`알 수 없는 글자: ${ch}`);
   }
   let p = 0;
   const peek = () => toks[p], eat = (t) => { if (!toks[p] || toks[p].t !== t) throw new Error(`'${t}' 가 필요함`); return toks[p++]; };
+  function cmp() { let n = cat(); while (peek() && peek().t === 'cmp') { const o = toks[p++].v; n = { o: 'cmp', v: o, a: n, b: cat() }; } return n; }
+  function cat() { let n = expr(); while (peek() && peek().t === '&') { p++; n = { o: '&', a: n, b: expr() }; } return n; }
   function expr() { let n = term(); while (peek() && (peek().t === '+' || peek().t === '-')) { const o = toks[p++].t; n = { o, a: n, b: term() }; } return n; }
   function term() { let n = unary(); while (peek() && (peek().t === '*' || peek().t === '/')) { const o = toks[p++].t; n = { o, a: n, b: unary() }; } return n; }
   function unary() { if (peek() && peek().t === '-') { p++; return { o: 'neg', a: unary() }; } if (peek() && peek().t === '+') { p++; return unary(); } return atom(); }
@@ -375,16 +429,24 @@ function parseExpr(src) {
     const t = peek();
     if (!t) throw new Error('식이 덜 끝남');
     if (t.t === 'num') { p++; return { o: 'num', v: t.v }; }
+    if (t.t === 'str') { p++; return { o: 'str', v: t.v }; }
     if (t.t === 'col') { p++; return { o: 'col', v: t.v }; }
-    if (t.t === '(') { p++; const n = expr(); eat(')'); return n; }
+    if (t.t === '(') { p++; const n = cmp(); eat(')'); return n; }
     if (t.t === 'fn') {
-      p++; if (!['ROUND', 'ABS'].includes(t.v)) throw new Error(`없는 함수: ${t.v}`);
-      eat('('); const args = [expr()]; while (peek() && peek().t === ',') { p++; args.push(expr()); } eat(')');
+      p++;
+      if ((t.v === 'TRUE' || t.v === 'FALSE') && !(peek() && peek().t === '(')) return { o: 'bool', v: t.v === 'TRUE' };
+      const def = FORMULA_FNS[t.v];
+      if (!def) throw new Error(`없는 함수: ${t.v}`);
+      eat('('); const args = [];
+      if (!(peek() && peek().t === ')')) { args.push(cmp()); while (peek() && peek().t === ',') { p++; args.push(cmp()); } }
+      eat(')');
+      if (args.length < def[0] || args.length > def[1]) throw new Error(`${t.v} 는 값 ${def[0] === def[1] ? def[0] : `${def[0]}~${def[1]}`}개가 필요함`);
       return { o: 'fn', v: t.v, args };
     }
     throw new Error('식 형식이 이상함');
   }
-  const tree = expr();
+  if (!toks.length) throw new Error('식이 비어 있음');
+  const tree = cmp();
   if (p < toks.length) throw new Error('식 뒤에 남은 글자가 있음');
   return tree;
 }
@@ -395,23 +457,148 @@ function exprCols(n, out = []) {
   if (n.args) n.args.forEach((x) => exprCols(x, out));
   return out;
 }
+
+// 계산용 값 변환
+function cNum(v) {
+  if (isEmpty(v)) return 0;
+  if (typeof v === 'boolean') return v ? 1 : 0;
+  const n = toNum(v);
+  if (n == null) throw new CalcErr('숫자가 아님');
+  return n;
+}
+function cStr(v) { return v == null ? '' : str(v); }
+function cBool(v) {
+  if (typeof v === 'boolean') return v;
+  if (isEmpty(v)) return false;
+  if (typeof v === 'number') return v !== 0;
+  const s = String(v).trim().toUpperCase();
+  if (s === 'TRUE') return true; if (s === 'FALSE') return false;
+  const n = toNum(v); if (n != null) return n !== 0;
+  throw new CalcErr('참/거짓이 아님');
+}
+function cDate(v) { const d = toDate(v); if (!d) throw new CalcErr('날짜가 아님'); return d; }
+function cCmp(a, b, o) {
+  let c;
+  const ea = isEmpty(a), eb = isEmpty(b);
+  if (ea && eb) c = 0;
+  else if (a instanceof Date || b instanceof Date) {
+    const da = toDate(a), db = toDate(b);
+    c = da && db ? da - db : cStr(a).localeCompare(cStr(b));
+  } else {
+    const na = typeof a === 'number' ? a : (ea ? 0 : toNum(a)), nb = typeof b === 'number' ? b : (eb ? 0 : toNum(b));
+    // 둘 다 숫자로 읽히면 숫자 비교, 아니면 글자 비교 (대소문자 무시)
+    if (na != null && nb != null && (typeof a === 'number' || typeof b === 'number' || (/^[\d\s,.+-]+$/.test(cStr(a)) && /^[\d\s,.+-]+$/.test(cStr(b))))) c = na - nb;
+    else { const sa = cStr(a).toLowerCase(), sb = cStr(b).toLowerCase(); c = sa < sb ? -1 : sa > sb ? 1 : 0; }
+  }
+  switch (o) { case '=': return c === 0; case '<>': return c !== 0; case '<': return c < 0; case '>': return c > 0; case '<=': return c <= 0; default: return c >= 0; }
+}
+function roundBy(x, d, mode) {
+  const f = Math.pow(10, d);
+  const y = +(x * f).toPrecision(15);
+  const r = mode === 'up' ? Math.sign(y) * Math.ceil(Math.abs(y)) : mode === 'down' ? Math.sign(y) * Math.floor(Math.abs(y)) : Math.sign(y) * Math.round(Math.abs(y));
+  return r / f;
+}
+function fmtText(v, f) {
+  if (v instanceof Date || (typeof v === 'string' && toDate(v) && /[YyDd]/.test(f))) {
+    const d = toDate(v);
+    return f.replace(/YYYY|yyyy|YY|yy|MM|DD|dd|HH|hh|mm|ss|M|D|d/g, (k, at) => {
+      switch (k) {
+        case 'YYYY': case 'yyyy': return String(d.getFullYear());
+        case 'YY': case 'yy': return pad(d.getFullYear() % 100);
+        case 'MM': return /[Hh]{2}:?$/.test(f.slice(0, at)) ? pad(d.getMinutes()) : pad(d.getMonth() + 1);
+        case 'mm': return pad(d.getMinutes());
+        case 'M': return String(d.getMonth() + 1);
+        case 'DD': case 'dd': return pad(d.getDate());
+        case 'D': case 'd': return String(d.getDate());
+        case 'HH': case 'hh': return pad(d.getHours());
+        case 'ss': return pad(d.getSeconds());
+        default: return k;
+      }
+    });
+  }
+  const n = typeof v === 'number' ? v : toNum(v);
+  if (n == null || !/[0#]/.test(f)) return cStr(v);
+  // 숫자 형식: #,##0 / 0.00 / 0000 정도만
+  const m = f.match(/^([^0#,.]*)([0#,]*)(?:\.(0+))?(.*)$/);
+  if (!m) return cStr(v);
+  const dec = m[3] ? m[3].length : 0, comma = m[2].includes(','), minInt = (m[2].match(/0/g) || []).length;
+  let [ip, fp] = Math.abs(roundBy(n, dec)).toFixed(dec).split('.');
+  ip = ip.padStart(minInt, '0'); if (minInt === 0 && ip === '0' && dec) ip = '0';
+  if (comma) ip = ip.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return (n < 0 ? '-' : '') + m[1] + ip + (dec ? '.' + fp : '') + m[4];
+}
+const RE_CACHE = new Map();
+function cRegex(p) {
+  if (!RE_CACHE.has(p)) { try { RE_CACHE.set(p, new RegExp(p)); } catch (e) { RE_CACHE.set(p, null); } }
+  const re = RE_CACHE.get(p); if (!re) throw new CalcErr('정규식이 잘못됨'); return re;
+}
+
 function evalExpr(n, get) {
   switch (n.o) {
-    case 'num': return n.v;
-    case 'col': { const v = get(n.v); if (isEmpty(v)) return 0; return toNum(v); }
-    case 'neg': { const a = evalExpr(n.a, get); return a == null ? null : -a; }
-    case 'fn': {
-      const a = evalExpr(n.args[0], get); if (a == null) return null;
-      if (n.v === 'ABS') return Math.abs(a);
-      const d = n.args[1] ? evalExpr(n.args[1], get) || 0 : 0; const f = Math.pow(10, d);
-      return Math.round(a * f) / f;
-    }
+    case 'num': case 'str': case 'bool': return n.v;
+    case 'col': return get(n.v);
+    case 'neg': return -cNum(evalExpr(n.a, get));
+    case '&': return cStr(evalExpr(n.a, get)) + cStr(evalExpr(n.b, get));
+    case 'cmp': return cCmp(evalExpr(n.a, get), evalExpr(n.b, get), n.v);
+    case 'fn': return evalFn(n.v, n.args, get);
     default: {
-      const a = evalExpr(n.a, get), b = evalExpr(n.b, get);
-      if (a == null || b == null) return null;
+      const a = cNum(evalExpr(n.a, get)), b = cNum(evalExpr(n.b, get));
       if (n.o === '+') return a + b; if (n.o === '-') return a - b; if (n.o === '*') return a * b;
-      return b === 0 ? null : a / b;
+      if (b === 0) throw new CalcErr('0으로 나눔');
+      return a / b;
     }
+  }
+}
+function evalFn(fn, args, get) {
+  if (LAZY_FNS.has(fn)) {
+    switch (fn) {
+      case 'IF': return cBool(evalExpr(args[0], get)) ? evalExpr(args[1], get) : (args[2] ? evalExpr(args[2], get) : null);
+      case 'IFERROR': try { return evalExpr(args[0], get); } catch (e) { if (e instanceof CalcErr) return evalExpr(args[1], get); throw e; }
+      case 'AND': return args.every((x) => cBool(evalExpr(x, get)));
+      default: return args.some((x) => cBool(evalExpr(x, get)));
+    }
+  }
+  const v = args.map((x) => evalExpr(x, get));
+  const s0 = () => cStr(v[0]);
+  const cnt = (k, d) => { if (v[k] == null) return d; const x = Math.trunc(cNum(v[k])); if (x < 0) throw new CalcErr('글자 수는 0 이상'); return x; };
+  switch (fn) {
+    case 'LEFT': return [...s0()].slice(0, cnt(1, 1)).join('');
+    case 'RIGHT': { const a = [...s0()]; const k = cnt(1, 1); return k ? a.slice(-k).join('') : ''; }
+    case 'MID': { const st = Math.trunc(cNum(v[1])); if (st < 1) throw new CalcErr('시작 위치는 1부터'); return [...s0()].slice(st - 1, st - 1 + cnt(2, 0)).join(''); }
+    case 'LEN': return [...s0()].length;
+    case 'TRIM': return s0().replace(/[\s ]+/g, ' ').trim();
+    case 'SUBSTITUTE': { const o = cStr(v[1]); return o ? s0().split(o).join(cStr(v[2])) : s0(); }
+    case 'UPPER': return s0().toUpperCase();
+    case 'LOWER': return s0().toLowerCase();
+    case 'TEXTBEFORE': case 'TEXTAFTER': {
+      const s = s0(), d = cStr(v[1]); const k = s.indexOf(d);
+      if (!d || k < 0) throw new CalcErr(`"${d}" 가 없음`);
+      return fn === 'TEXTBEFORE' ? s.slice(0, k) : s.slice(k + d.length);
+    }
+    case 'DIGITS': return s0().replace(/\D/g, '');
+    case 'REGEXEXTRACT': { const m = s0().match(cRegex(cStr(v[1]))); if (!m) throw new CalcErr('맞는 부분 없음'); return m[0]; }
+    case 'VALUE': { if (typeof v[0] === 'number') return v[0]; const x = toNum(v[0]); if (x == null) throw new CalcErr('숫자가 아님'); return x; }
+    case 'ROUND': return roundBy(cNum(v[0]), v[1] == null ? 0 : Math.trunc(cNum(v[1])), 'half');
+    case 'ROUNDUP': return roundBy(cNum(v[0]), v[1] == null ? 0 : Math.trunc(cNum(v[1])), 'up');
+    case 'ROUNDDOWN': return roundBy(cNum(v[0]), v[1] == null ? 0 : Math.trunc(cNum(v[1])), 'down');
+    case 'ABS': return Math.abs(cNum(v[0]));
+    case 'ISBLANK': return isEmpty(v[0]);
+    case 'YEAR': return cDate(v[0]).getFullYear();
+    case 'MONTH': return cDate(v[0]).getMonth() + 1;
+    case 'DAY': return cDate(v[0]).getDate();
+    case 'TEXT': return fmtText(v[0], cStr(v[1]));
+    default: throw new Error(`없는 함수: ${fn}`);
+  }
+}
+// 한 줄 계산. 실패하면 { err }
+function calcRow(tree, get) {
+  try {
+    let v = evalExpr(tree, get);
+    if (typeof v === 'number') { if (!Number.isFinite(v)) return { err: '숫자 범위 벗어남' }; v = +v.toPrecision(15); }
+    return { v: v === '' ? null : v };
+  } catch (e) {
+    if (e instanceof CalcErr) return { err: e.message };
+    throw e;
   }
 }
 
@@ -434,6 +621,34 @@ const PIVOT_MAX_COLS = 200;
 const AGG_FNS = [['sum', '합계'], ['count', '개수'], ['rows', '행 수'], ['avg', '평균'], ['min', '최소'], ['max', '최대'], ['distinct', '고유 개수']];
 const DATE_FMTS = [['date', '엑셀 날짜 값'], ['YYYY-MM-DD', '2026-01-05'], ['YYYY.MM.DD', '2026.01.05'], ['YYYY/MM/DD', '2026/01/05'], ['YYYYMMDD', '20260105'], ['YYYY-MM', '2026-01'], ['KR', '2026년 1월 5일']];
 const VAL_ACTIONS = [['trim', '앞뒤 공백 정리'], ['number', '숫자로 바꾸기'], ['date', '날짜 형식 맞추기'], ['replace', '값 치환'], ['fill', '빈 칸 채우기']];
+
+// 계산 열 미리보기·예시 대상 열 (규칙에 저장 안 함)
+const CALC_PV = new WeakMap();
+const CALC_EXCOL = new WeakMap();
+// [이름, 열 이름 힌트, 식, 새 열 꼬리 (null이면 그 열 덮어쓰기)]
+const CALC_EX = [
+  ['끝 4자리', /전화|연락|휴대|핸드폰|phone|tel/i, (x) => `RIGHT(DIGITS([${x}]), 4)`, '끝4자리'],
+  ['숫자만', /전화|연락|휴대|번호/i, (x) => `DIGITS([${x}])`, '숫자'],
+  ['하이픈 빼기', /전화|연락|휴대|번호/i, (x) => `SUBSTITUTE([${x}], "-", "")`, null],
+  ['이메일 아이디', /메일|mail/i, (x) => `TEXTBEFORE([${x}], "@")`, '아이디'],
+  ['이메일 도메인', /메일|mail/i, (x) => `TEXTAFTER([${x}], "@")`, '도메인'],
+  ['공백 정리', null, (x) => `TRIM([${x}])`, null],
+  ['두 열 붙이기', null, (x, y) => `[${x}] & " " & [${y}]`, '합침'],
+  ['빈 칸이면 기본값', null, (x) => `IF(ISBLANK([${x}]), "없음", [${x}])`, null],
+  ['연도만', /일자|날짜|일$|date/i, (x) => `YEAR([${x}])`, '연도'],
+  ['연-월', /일자|날짜|일$|date/i, (x) => `TEXT([${x}], "YYYY-MM")`, '연월'],
+  ['전화번호 가리기', /전화|연락|휴대|핸드폰|phone|tel/i, (x) => `LEFT(DIGITS([${x}]), 3) & "-****-" & RIGHT(DIGITS([${x}]), 4)`, '가림'],
+];
+function applyCalcEx(st, cols, ex) {
+  const [, hint, make, tail] = ex;
+  const pick = CALC_EXCOL.get(st);
+  const x = (pick && cols.includes(pick)) ? pick : (hint && cols.find((c) => hint.test(c))) || cols[0];
+  if (!x) return;
+  const y = cols[cols.indexOf(x) + 1] || cols.find((c) => c !== x) || x;
+  st.expr = make(x, y);
+  if (tail == null) st.target = x;
+  else { st.target = ''; st.name = `${x}_${tail}`; }
+}
 
 // 단계 정의: label, icon, desc, init(cols), apply(t, st) → {cols, rows, warn?}, summary(st)
 const STEP_DEFS = {
@@ -587,19 +802,31 @@ const STEP_DEFS = {
     summary: (st) => st.col ? `${st.col} 을 "${st.sep}" 기준으로` : '열 선택 필요',
   },
   calc: {
-    label: '계산 열', icon: 'ƒ', desc: '[단가]*[수량] 같은 식',
-    init: () => ({ name: '계산', expr: '' }),
+    label: '계산 열', icon: 'ƒ', desc: '엑셀식 수식 (RIGHT, IF, TEXT 등)',
+    init: () => ({ name: '계산', expr: '', target: '' }),
     apply(t, st) {
+      CALC_PV.delete(st);
       if (!st.expr.trim()) return t;
       const tree = parseExpr(st.expr);
-      const used = exprCols(tree);
+      const used = [...new Set(exprCols(tree))];
       const ix = {}; used.forEach((c) => { ix[c] = ci(t, c); });
-      let bad = 0;
-      const name = uniqName(t.cols, (st.name || '계산').trim());
-      const rows = t.rows.map((r) => { const v = evalExpr(tree, (c) => r[ix[c]]); if (v == null) bad++; return keepKind(r, [...r, v == null ? null : +v.toPrecision(15)]); });
-      return { cols: [...t.cols, name], rows, warn: bad ? `계산 못 한 행 ${bad.toLocaleString()}개 (숫자가 아니거나 0으로 나눔)` : null };
+      const tj = st.target ? ci(t, st.target) : -1;
+      let bad = 0; const why = new Map(); const pv = [];
+      const rows = t.rows.map((r) => {
+        const res = calcRow(tree, (c) => r[ix[c]]);
+        if (res.err) { bad++; why.set(res.err, (why.get(res.err) || 0) + 1); }
+        const v = res.err ? null : res.v;
+        if (pv.length < 3 && !r.kind) pv.push({ src: used.length ? r[ix[used[0]]] : undefined, v, err: res.err });
+        if (tj >= 0) { const o = r.slice(); o[tj] = v; return keepKind(r, o); }
+        return keepKind(r, [...r, v]);
+      });
+      CALC_PV.set(st, pv);
+      const top = [...why].sort((x, y) => y[1] - x[1])[0];
+      const warn = bad ? `계산 실패 ${bad.toLocaleString()}줄 (빈 칸으로 둠) · 주된 이유: ${top[0]}` : null;
+      if (tj >= 0) return { cols: t.cols, meta: t.meta, rows, warn };
+      return { cols: [...t.cols, uniqName(t.cols, (st.name || '계산').trim())], rows, warn };
     },
-    summary: (st) => st.expr ? `${st.name || '계산'} = ${st.expr}` : '식 입력 필요',
+    summary: (st) => (!st.expr ? '식 입력 필요' : st.target ? `${st.target} ← ${st.expr}` : `${st.name || '계산'} = ${st.expr}`),
   },
   group: {
     label: '집계', icon: 'Σ', desc: '그룹별 합계·개수·평균',
@@ -1027,13 +1254,26 @@ function stepBody(st, cols, idx) {
         h('label', { class: 'tgl' }, h('input', { type: 'checkbox', checked: st.drop, onchange: (e) => { st.drop = e.target.checked; changed(true); } }), h('span', null, '원래 열은 지우기')),
       ];
     case 'calc': {
-      const exprIn = textInput(st, 'expr', '[단가] * [수량]');
+      const insert = (txt) => {
+        st.expr = (st.expr ? st.expr.replace(/\s*$/, st.expr.trim().endsWith('(') ? '' : ' ') : '') + txt; changed(true);
+        requestAnimationFrame(() => { const el = document.querySelector(`[data-calcexpr="${idx}"]`); if (el) { el.focus(); el.selectionStart = el.selectionEnd = el.value.length; } });
+      };
+      const fnRows = Object.entries(FORMULA_FNS).map(([k, d]) => h('tr', null, h('td', null, h('button', { class: 'link', title: '식에 넣기', onclick: () => insert(`${k}(`) }, k)), h('td', null, d[2]), h('td', { class: 'mono' }, d[3])));
       return [
-        textInput(st, 'name', '새 열 이름'),
-        exprIn,
-        h('div', { class: 'row' }, select([['', '＋ 열 이름 넣기'], ...cols], '', (v) => {
-          if (!v) return; st.expr = (st.expr ? st.expr.replace(/\s*$/, ' ') : '') + `[${v}]`; changed(true);
-        })),
+        h('div', { class: 'row' },
+          select([['', '새 열로 추가'], ...cols.map((c) => [c, `덮어쓰기: ${c}`])], st.target || '', (v) => { st.target = v; changed(true); }),
+          st.target ? null : textInput(st, 'name', '새 열 이름')),
+        textInput(st, 'expr', 'RIGHT(DIGITS([전화번호]), 4)', { class: 'mono', 'data-calcexpr': idx }),
+        h('div', { class: 'row' },
+          select([['', '＋ 열 넣기'], ...cols], '', (v) => { if (v) insert(`[${v}]`); }),
+          select([['', '＋ 함수 넣기'], ...Object.entries(FORMULA_FNS).map(([k, d]) => [k, `${k} · ${d[2]}`])], '', (v) => { if (v) insert(`${v}(`); })),
+        h('div', { class: 'calc-pv', 'data-calcpv': idx }),
+        h('div', { class: 'lbl' }, '예시'),
+        h('div', { class: 'row' }, select([['', '대상 열: 자동'], ...cols.map((c) => [c, `대상 열: ${c}`])], CALC_EXCOL.get(st) || '', (v) => { CALC_EXCOL.set(st, v); })),
+        h('div', { class: 'ex-row' }, ...CALC_EX.map((ex) => h('button', { class: 'btn sm', onclick: () => { applyCalcEx(st, cols, ex); changed(true); } }, ex[0]))),
+        h('details', { class: 'fn-help' }, h('summary', null, '함수 목록'),
+          h('div', { class: 'fn-note' }, '열은 [열 이름], 글자는 "따옴표", 글자 붙이기는 &, 비교는 = <> > < >= <='),
+          h('table', null, h('tbody', null, ...fnRows))),
       ];
     }
     case 'group': {
@@ -1241,6 +1481,16 @@ function updateStepMeta() {
     if (err) { err.hidden = !info.error; err.textContent = info.error ? `건너뜀: ${info.error}` : ''; }
     const warn = document.querySelector(`[data-warn="${i}"]`);
     if (warn) { warn.hidden = !info.warn; warn.textContent = info.warn || ''; }
+    const pvEl = document.querySelector(`[data-calcpv="${i}"]`);
+    if (pvEl) {
+      pvEl.textContent = '';
+      const pv = !info.error && st.on !== false && CALC_PV.get(st);
+      pvEl.hidden = !(pv && pv.length);
+      if (pv) pv.forEach((x) => pvEl.append(h('div', { class: 'pv-line' + (x.err ? ' bad' : '') },
+        x.src !== undefined ? h('span', { class: 'pv-src' }, str(x.src) || '(빈 칸)') : null,
+        x.src !== undefined ? h('span', { class: 'pv-arr' }, '→') : null,
+        h('span', { class: 'pv-out' }, x.err ? `실패: ${x.err}` : (str(x.v) || '(빈 칸)')))));
+    }
   });
 }
 function addStep(type) {

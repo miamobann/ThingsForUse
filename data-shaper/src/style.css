@@ -280,6 +280,24 @@ table.grid { border-collapse: separate; border-spacing: 0; font-size: 12.5px; }
 .more { padding: 12px 16px; color: var(--text-3); font-size: 12px; }
 .empty-res { padding: 40px; text-align: center; color: var(--text-3); }
 
+/* 계산 열 */
+.mono, input.mono { font-family: var(--mono); font-size: 12.5px; }
+.ex-row { display: flex; flex-wrap: wrap; gap: 4px; }
+.ex-row .btn.sm { padding: 3px 8px; font-size: 11.5px; }
+.calc-pv { display: flex; flex-direction: column; gap: 2px; font-family: var(--mono); font-size: 11.5px; background: var(--surface-2); border-radius: 6px; padding: 6px 8px; }
+.pv-line { display: flex; gap: 6px; min-width: 0; }
+.pv-src { color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 50%; }
+.pv-arr { color: var(--text-3); flex: none; }
+.pv-out { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pv-line.bad .pv-out { color: var(--danger); }
+.fn-help { font-size: 12px; }
+.fn-help summary { cursor: pointer; color: var(--text-2); }
+.fn-note { color: var(--text-3); margin: 6px 0; }
+.fn-help table { width: 100%; border-collapse: collapse; }
+.fn-help td { padding: 3px 4px; border-top: 1px solid var(--line); vertical-align: top; }
+.fn-help td:first-child { white-space: nowrap; }
+.fn-help td.mono { font-size: 11px; color: var(--text-2); word-break: break-all; }
+
 /* 결과 표 선택 */
 .grid.res { user-select: none; }
 .grid.res td:not(.rn) { cursor: cell; }
