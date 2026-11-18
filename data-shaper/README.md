@@ -9,7 +9,7 @@
 3. 원본 읽기: 머리글 시작 줄·줄 수를 확인한다. 원본 탭에서 줄 번호를 누르면 그 줄부터 머리글로 지정.
 4. 가공 단계를 추가한다. 위에서부터 순서대로 적용됨.
 5. 원하는 열 구성이 정해진 양식이 있으면 "템플릿으로 열 맞추기"로 머리글만 있는 엑셀을 올린다.
-6. 결과 형식(xlsx/csv) 고르고 내려받기.
+6. 결과 형식(xlsx/csv/json) 고르고 내려받기. 일부만 필요하면 결과 표에서 드래그로 골라 복사(엑셀용, JS 객체 배열, JSON, JS 2차원 배열, 한 열 목록). Ctrl+A 전체, Ctrl+C 엑셀용, Esc 해제.
 
 규칙(읽기 설정·단계)은 "4 규칙"에서 이름을 붙여 "규칙 저장"하면 브라우저 저장소(localStorage)에 목록으로 쌓이고, 나중에 목록에서 골라 "적용"한다. 같은 이름으로 저장하면 덮어씀. "내보내기"는 목록 전체를 JSON 한 파일로, "가져오기"는 그 파일의 규칙을 목록에 추가(같은 이름은 덮어씀).
 
@@ -57,6 +57,7 @@ node test/make-samples.js     # 가짜 테스트 데이터 생성 (test/samples/
 node test/e2e.js              # 브라우저 동작 + 외부 요청 0건 확인 (playwright)
 python3 test/make-styled-sample.py && node test/e2e-style.js   # 서식 유지 확인
 node test/e2e-reload.js       # 새로고침 복원 확인
+node test/e2e-copy.js         # 결과 표 선택·복사, JSON 내려받기 확인
 ```
 
 `data-shaper.html`은 빌드 결과물. 수정은 `src/`에서 하고 빌드.

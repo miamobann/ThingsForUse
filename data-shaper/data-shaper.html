@@ -289,6 +289,22 @@ table.grid { border-collapse: separate; border-spacing: 0; font-size: 12.5px; }
 .more { padding: 12px 16px; color: var(--text-3); font-size: 12px; }
 .empty-res { padding: 40px; text-align: center; color: var(--text-3); }
 
+/* 결과 표 선택 */
+.grid.res { user-select: none; }
+.grid.res td:not(.rn) { cursor: cell; }
+.grid.res tbody tr td.sel { background: color-mix(in srgb, var(--accent) 16%, transparent); box-shadow: inset 0 0 0 .5px color-mix(in srgb, var(--accent) 45%, transparent); }
+.grid.xl.res tbody tr td.sel { background: #dbe8fd; }
+.grid.res thead th.sel-h, .grid.res td.rn.sel-h, .grid.xl.res thead th.sel-h { background: color-mix(in srgb, var(--accent) 22%, var(--surface-2)); color: var(--accent); }
+.grid.res td.rn { cursor: pointer; }
+.sel-bar {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 8px 14px; border-top: 1px solid var(--line);
+  background: var(--surface-2); font-size: 12.5px;
+}
+.sel-cnt { font-weight: 600; font-variant-numeric: tabular-nums; margin-right: 4px; }
+.sel-hdr { padding: 0; font-size: 12px; color: var(--text-2); }
+.sel-sep { width: 1px; height: 18px; background: var(--line-2); margin: 0 4px; }
+.sel-bar .icon-btn { margin-left: auto; }
+
 /* 시트 선택 */
 .sheet-pick { display: flex; align-items: center; gap: 6px; width: 100%; }
 .sheet-pick select { flex: 1; min-width: 0; }
@@ -335,7 +351,7 @@ table.grid { border-collapse: separate; border-spacing: 0; font-size: 12.5px; }
 .drop-s { color: var(--text-2); margin-top: 4px; }
 
 .toast {
-  position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: var(--text); color: var(--surface);
+  position: fixed; left: 50%; bottom: 64px; transform: translateX(-50%); background: var(--text); color: var(--surface);
   padding: 9px 16px; border-radius: 8px; font-size: 13px; box-shadow: 0 6px 20px rgba(0,0,0,.2); z-index: 50; max-width: 80vw;
 }
 .toast.bad { background: var(--danger); color: #fff; }
@@ -418,7 +434,7 @@ table.grid { border-collapse: separate; border-spacing: 0; font-size: 12.5px; }
       <div class="spacer"></div>
       <div class="export">
         <input type="text" id="outName" class="out-name" spellcheck="false">
-        <select id="outFmt"><option value="xlsx">엑셀 (.xlsx)</option><option value="csv">CSV (.csv)</option></select>
+        <select id="outFmt"><option value="xlsx">엑셀 (.xlsx)</option><option value="csv">CSV (.csv)</option><option value="json">JSON (.json)</option></select>
         <button class="btn primary" id="btnDown">내려받기</button>
       </div>
     </div>
@@ -1854,6 +1870,7 @@ function renderView() {
     legend.hidden = true;
     renderResult(view);
   }
+  paintSel();
 }
 function renderResult(view) {
   const t = S.out;
@@ -1866,7 +1883,7 @@ function renderResult(view) {
   const hcss = cs.map((x, j) => wcss[j] + styleCss(x.head));
   const dcss = cs.map((x, j) => wcss[j] + styleCss(x.data));
   const nf = cs.map((x) => (x.data && x.data.numFmt) || null);
-  let html = `<table class="grid${xl ? ' xl' : ''}"><thead><tr><th class="rn"></th>`;
+  let html = `<table class="grid res${xl ? ' xl' : ''}"><thead><tr><th class="rn"></th>`;
   t.cols.forEach((c, i) => { html += `<th class="fh" data-col="${i}" title="눌러서 서식 편집"${xl ? ` style="${esc(hcss[i])}"` : ''}>${esc(c)}<span class="ty">${colType(t.rows, i)}</span></th>`; });
   html += '</tr></thead><tbody>';
   for (let r = 0; r < n; r++) {
@@ -1919,6 +1936,195 @@ function renderRaw(view) {
   html += '</tbody></table>';
   if (g.length > n) html += `<div class="more">원본 미리보기는 ${n.toLocaleString()}줄까지</div>`;
   view.innerHTML = html;
+}
+
+// ───────────────────────── 결과 표 선택·복사 ─────────────────────────
+// 클립보드로만 복사. 외부 전송 없음.
+// S.sel: { a:[r,c], b:[r,c], mode:'cell'|'col'|'row'|'all' }
+const COPY_FMTS = [
+  ['tsv', '엑셀용'],
+  ['jsobj', 'JS 객체 배열'],
+  ['json', 'JSON'],
+  ['jsarr', 'JS 2차원 배열'],
+  ['lines', '목록 (줄바꿈)'],
+  ['comma', '목록 (쉼표)'],
+];
+let selDrag = null;
+
+function selRange() {
+  const s = S.sel, t = S.out;
+  if (!s || !t || !t.cols.length) return null;
+  const nr = t.rows.length, nc = t.cols.length;
+  let r1 = Math.min(s.a[0], s.b[0]), r2 = Math.max(s.a[0], s.b[0]);
+  let c1 = Math.min(s.a[1], s.b[1]), c2 = Math.max(s.a[1], s.b[1]);
+  if (s.mode === 'col' || s.mode === 'all') { r1 = 0; r2 = nr - 1; }
+  if (s.mode === 'row' || s.mode === 'all') { c1 = 0; c2 = nc - 1; }
+  r2 = Math.min(r2, nr - 1); c2 = Math.min(c2, nc - 1);
+  if (r1 > r2 || c1 > c2) return null;
+  return { r1, r2, c1, c2, rows: r2 - r1 + 1, cols: c2 - c1 + 1 };
+}
+function setSel(sel) { S.sel = sel; paintSel(); }
+function clearSel() { if (!S.sel) return; S.sel = null; paintSel(); }
+
+function paintSel() {
+  const view = $('view');
+  view.querySelectorAll('.sel').forEach((el) => el.classList.remove('sel'));
+  view.querySelectorAll('.sel-h').forEach((el) => el.classList.remove('sel-h'));
+  const g = S.view === 'result' && selRange();
+  renderSelBar(g);
+  if (!g) return;
+  const tbody = view.querySelector('table.grid tbody'); if (!tbody) return;
+  view.querySelectorAll('thead th.fh').forEach((th) => { const j = +th.dataset.col; if (j >= g.c1 && j <= g.c2) th.classList.add('sel-h'); });
+  const trs = tbody.rows;
+  const end = Math.min(g.r2, trs.length - 1);
+  for (let r = g.r1; r <= end; r++) {
+    const cells = trs[r].cells;
+    cells[0].classList.add('sel-h');
+    for (let c = g.c1; c <= g.c2; c++) if (cells[c + 1]) cells[c + 1].classList.add('sel');
+  }
+}
+
+function renderSelBar(g) {
+  let bar = $('selBar');
+  if (!g) { if (bar) bar.hidden = true; return; }
+  if (!bar) {
+    bar = h('div', { id: 'selBar', class: 'sel-bar' });
+    $('view').after(bar);
+  }
+  bar.hidden = false; bar.textContent = '';
+  const one = g.cols === 1;
+  bar.append(
+    h('span', { class: 'sel-cnt' }, `${g.rows.toLocaleString()}행 × ${g.cols}열`),
+    h('label', { class: 'tgl sel-hdr', title: '엑셀용 복사에 머리글 줄 넣기' },
+      h('input', { type: 'checkbox', checked: S.copyHead !== false, onchange: (e) => { S.copyHead = e.target.checked; } }), h('span', null, '머리글 포함')),
+    h('span', { class: 'sel-sep' }),
+    ...COPY_FMTS.filter(([k]) => one || (k !== 'lines' && k !== 'comma'))
+      .map(([k, label]) => h('button', { class: 'btn sm' + (k === 'tsv' ? ' primary' : ''), onclick: () => copySel(k) }, label)),
+    h('button', { class: 'icon-btn', title: '선택 해제 (Esc)', onclick: clearSel }, '×'));
+}
+
+// 값 → 복사용
+function jsVal(v) {
+  if (v == null || v === '') return null;
+  if (v instanceof Date) return fmtDate(v);
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  return v;
+}
+function jsLit(v) {
+  const x = jsVal(v);
+  return x == null ? 'null' : typeof x === 'number' || typeof x === 'boolean' ? String(x) : JSON.stringify(x);
+}
+const JS_IDENT = /^[A-Za-z_$가-힣][\w$가-힣]*$/;
+function jsKey(k) { return JS_IDENT.test(k) ? k : JSON.stringify(k); }
+function tsvCell(v) {
+  const s = str(v);
+  return /[\t\r\n"]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+function uniqKeys(cols) {
+  const seen = new Map();
+  return cols.map((c) => { const k = c || '열'; const n = (seen.get(k) || 0) + 1; seen.set(k, n); return n > 1 ? `${k}_${n}` : k; });
+}
+
+function selText(kind, g) {
+  const t = S.out;
+  const cols = uniqKeys(t.cols.slice(g.c1, g.c2 + 1));
+  const rows = t.rows.slice(g.r1, g.r2 + 1).map((r) => r.slice(g.c1, g.c2 + 1));
+  switch (kind) {
+    case 'tsv': {
+      const lines = rows.map((r) => r.map(tsvCell).join('\t'));
+      if (S.copyHead !== false) lines.unshift(cols.map(tsvCell).join('\t'));
+      return lines.join('\r\n');
+    }
+    case 'json':
+      return JSON.stringify(rows.map((r) => Object.fromEntries(cols.map((k, j) => [k, jsVal(r[j])]))), null, 2);
+    case 'jsobj':
+      return `[\n${rows.map((r) => `  { ${cols.map((k, j) => `${jsKey(k)}: ${jsLit(r[j])}`).join(', ')} },`).join('\n')}\n]`;
+    case 'jsarr':
+      return `[\n${rows.map((r) => `  [${r.map(jsLit).join(', ')}],`).join('\n')}\n]`;
+    case 'lines':
+      return rows.map((r) => str(r[0])).join('\n');
+    case 'comma':
+      return rows.map((r) => str(r[0])).filter((s) => s !== '').join(', ');
+    default: return '';
+  }
+}
+
+async function writeClip(text) {
+  try { await navigator.clipboard.writeText(text); return true; } catch (e) { /* 아래 방식으로 */ }
+  const ta = h('textarea', { style: 'position:fixed;left:-9999px;top:0', readonly: '' }, text);
+  document.body.append(ta); ta.select();
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+  ta.remove();
+  return ok;
+}
+async function copySel(kind) {
+  const g = selRange(); if (!g) return;
+  const text = selText(kind, g);
+  const ok = await writeClip(text);
+  const label = (COPY_FMTS.find(([k]) => k === kind) || [, ''])[1];
+  toast(ok ? `${g.rows.toLocaleString()}행 × ${g.cols}열 복사 (${label})` : '복사 실패. 브라우저 권한 확인', !ok);
+}
+
+function cellPos(el) {
+  const td = el.closest('td'); if (!td) return null;
+  const tr = td.parentElement; if (!tr.parentElement || tr.parentElement.tagName !== 'TBODY') return null;
+  return { r: tr.sectionRowIndex, c: td.cellIndex - 1, rn: td.classList.contains('rn') };
+}
+function initSelection() {
+  const view = $('view');
+  view.addEventListener('mousedown', (e) => {
+    if (S.view !== 'result' || e.button !== 0) return;
+    const th = e.target.closest('th.fh');
+    if (th) {
+      const c = +th.dataset.col;
+      if (e.shiftKey && S.sel && S.sel.mode === 'col') setSel({ ...S.sel, b: [0, c] });
+      else setSel({ a: [0, c], b: [0, c], mode: 'col' });
+      selDrag = 'col'; e.preventDefault(); return;
+    }
+    if (e.target.closest('thead .rn')) { setSel({ a: [0, 0], b: [0, 0], mode: 'all' }); e.preventDefault(); return; }
+    const p = cellPos(e.target); if (!p) return;
+    if (p.rn) {
+      if (e.shiftKey && S.sel && S.sel.mode === 'row') setSel({ ...S.sel, b: [p.r, 0] });
+      else setSel({ a: [p.r, 0], b: [p.r, 0], mode: 'row' });
+      selDrag = 'row';
+    } else {
+      if (e.shiftKey && S.sel && S.sel.mode === 'cell') setSel({ ...S.sel, b: [p.r, p.c] });
+      else setSel({ a: [p.r, p.c], b: [p.r, p.c], mode: 'cell' });
+      selDrag = 'cell';
+    }
+    e.preventDefault();
+  });
+  view.addEventListener('mouseover', (e) => {
+    if (!selDrag || !S.sel) return;
+    if (selDrag === 'col') {
+      const th = e.target.closest('th.fh'); if (th) setSel({ ...S.sel, b: [0, +th.dataset.col] });
+      return;
+    }
+    const p = cellPos(e.target); if (!p) return;
+    if (selDrag === 'row') setSel({ ...S.sel, b: [p.r, 0] });
+    else if (!p.rn) setSel({ ...S.sel, b: [p.r, p.c] });
+  });
+  window.addEventListener('mouseup', () => { selDrag = null; });
+  // Ctrl+C: 엑셀용, Ctrl+A: 전체, Esc: 해제
+  document.addEventListener('copy', (e) => {
+    if (S.view !== 'result' || !S.sel) return;
+    const ae = document.activeElement;
+    if (ae && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName)) return;
+    if (String(window.getSelection() || '')) return;
+    const g = selRange(); if (!g) return;
+    e.preventDefault();
+    e.clipboardData.setData('text/plain', selText('tsv', g));
+    toast(`${g.rows.toLocaleString()}행 × ${g.cols}열 복사 (엑셀용)`);
+  });
+  document.addEventListener('keydown', (e) => {
+    if (S.view !== 'result' || !S.out) return;
+    const ae = document.activeElement;
+    if (ae && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName)) return;
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a' && !$('view').hidden) {
+      e.preventDefault(); setSel({ a: [0, 0], b: [0, 0], mode: 'all' });
+    } else if (e.key === 'Escape' && !$('fmtPop')) clearSel(); // 서식 창 열려 있으면 창만 닫음
+  });
 }
 
 // ───────────────────────── 내려받기 ─────────────────────────
@@ -2140,6 +2346,11 @@ async function exportXlsx(t, name) {
   const buf = await wb.xlsx.writeBuffer();
   download(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `${name}.xlsx`);
 }
+function exportJson(t, name) {
+  const keys = uniqKeys(t.cols);
+  const data = t.rows.map((r) => Object.fromEntries(keys.map((k, j) => [k, jsVal(r[j])])));
+  download(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json;charset=utf-8' }), `${name}.json`);
+}
 function exportCsv(t, name) {
   const q = (v) => { const s = str(v); return /[",\r\n]/.test(s) || /^\s|\s$/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
   const lines = [t.cols.map(q).join(','), ...t.rows.map((r) => r.map(q).join(','))];
@@ -2150,12 +2361,15 @@ async function doDownload() {
   if (!S.out) return;
   runPipeline();
   const name = safeName($('outName').value);
-  const csv = $('outFmt').value === 'csv';
+  const fmt = $('outFmt').value;
   try {
-    if (csv) exportCsv(S.out, name); else await exportXlsx(S.out, name);
+    if (fmt === 'csv') exportCsv(S.out, name);
+    else if (fmt === 'json') exportJson(S.out, name);
+    else await exportXlsx(S.out, name);
   } catch (e) { console.error(e); toast(`내려받기 실패: ${e.message || e}`, true); return; }
   const hasGuide = !!guideRows();
-  toast(`${S.out.rows.length.toLocaleString()}행 내려받기 완료${hasGuide ? (csv ? ' (CSV는 시트가 하나라 가이드 시트는 빠짐. 엑셀로 받으면 포함)' : ' · 가이드 시트 포함') : ''}`);
+  const kind = fmt === 'csv' ? 'CSV' : 'JSON';
+  toast(`${S.out.rows.length.toLocaleString()}행 내려받기 완료${hasGuide ? (fmt !== 'xlsx' ? ` (${kind}에는 가이드 시트가 빠짐. 엑셀로 받으면 포함)` : ' · 가이드 시트 포함') : ''}`);
 }
 
 // ───────────────────────── 규칙 목록: 브라우저 저장소 + JSON 내보내기·가져오기 ─────────────────────────
@@ -2450,6 +2664,7 @@ function bind() {
   $('btnResetRule').onclick = resetRule;
   $('btnAdd').onclick = () => { const m = $('addMenu'); m.hidden = !m.hidden; };
   $('btnDown').onclick = doDownload;
+  initSelection();
   document.querySelectorAll('.tab').forEach((b) => { b.onclick = () => { S.view = b.dataset.view; closeFmtPop(); renderView(); saveSession(); }; });
   $('fmtView').onchange = (e) => { S.fmtView = e.target.checked; renderView(); saveSession(); };
   ['outFmt', 'outName', 'ruleName'].forEach((id) => $(id).addEventListener('input', saveSession));
@@ -2477,7 +2692,7 @@ function bind() {
       refresh(false); return;
     }
     const fh = e.target.closest('th.fh');
-    if (fh && S.view === 'result') { openFmtPop(+fh.dataset.col, fh); return; }
+    if (fh && S.view === 'result') { if (!e.shiftKey) openFmtPop(+fh.dataset.col, fh); return; }
     const rn = e.target.closest('[data-hdr]');
     if (rn && S.view === 'raw') {
       const sh = cur(); sh.read.headerStart = +rn.dataset.hdr; sh.toggled = new Set();

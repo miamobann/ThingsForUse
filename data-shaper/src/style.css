@@ -280,6 +280,22 @@ table.grid { border-collapse: separate; border-spacing: 0; font-size: 12.5px; }
 .more { padding: 12px 16px; color: var(--text-3); font-size: 12px; }
 .empty-res { padding: 40px; text-align: center; color: var(--text-3); }
 
+/* 결과 표 선택 */
+.grid.res { user-select: none; }
+.grid.res td:not(.rn) { cursor: cell; }
+.grid.res tbody tr td.sel { background: color-mix(in srgb, var(--accent) 16%, transparent); box-shadow: inset 0 0 0 .5px color-mix(in srgb, var(--accent) 45%, transparent); }
+.grid.xl.res tbody tr td.sel { background: #dbe8fd; }
+.grid.res thead th.sel-h, .grid.res td.rn.sel-h, .grid.xl.res thead th.sel-h { background: color-mix(in srgb, var(--accent) 22%, var(--surface-2)); color: var(--accent); }
+.grid.res td.rn { cursor: pointer; }
+.sel-bar {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 8px 14px; border-top: 1px solid var(--line);
+  background: var(--surface-2); font-size: 12.5px;
+}
+.sel-cnt { font-weight: 600; font-variant-numeric: tabular-nums; margin-right: 4px; }
+.sel-hdr { padding: 0; font-size: 12px; color: var(--text-2); }
+.sel-sep { width: 1px; height: 18px; background: var(--line-2); margin: 0 4px; }
+.sel-bar .icon-btn { margin-left: auto; }
+
 /* 시트 선택 */
 .sheet-pick { display: flex; align-items: center; gap: 6px; width: 100%; }
 .sheet-pick select { flex: 1; min-width: 0; }
@@ -326,7 +342,7 @@ table.grid { border-collapse: separate; border-spacing: 0; font-size: 12.5px; }
 .drop-s { color: var(--text-2); margin-top: 4px; }
 
 .toast {
-  position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: var(--text); color: var(--surface);
+  position: fixed; left: 50%; bottom: 64px; transform: translateX(-50%); background: var(--text); color: var(--surface);
   padding: 9px 16px; border-radius: 8px; font-size: 13px; box-shadow: 0 6px 20px rgba(0,0,0,.2); z-index: 50; max-width: 80vw;
 }
 .toast.bad { background: var(--danger); color: #fff; }
