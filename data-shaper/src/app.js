@@ -951,7 +951,7 @@ function stepBody(st, cols, idx) {
   switch (st.type) {
     case 'columns': {
       reconcileColumns(st, cols);
-      const list = h('div', { class: 'col-list', onscroll: (e) => { st._scroll = e.target.scrollTop; } });
+      const list = h('div', { class: 'col-list', 'data-keep-scroll': '', onscroll: (e) => { st._scroll = e.target.scrollTop; } });
       st.items.forEach((it, k) => {
         const missing = !cols.includes(it.src);
         list.append(h('div', { class: 'col-item' + (missing ? ' missing' : '') + (it.keep ? '' : ' dim') },
@@ -969,7 +969,6 @@ function stepBody(st, cols, idx) {
           h('button', { class: 'link', onclick: C(() => { st.items.sort((a, b) => (b.keep - a.keep)); }) }, '선택한 열 위로')),
         list,
       ];
-      requestAnimationFrame(() => { if (st._scroll) list.scrollTop = st._scroll; });
     }
     case 'filter': {
       const out = [];
@@ -1193,8 +1192,12 @@ function startColDrag(e, listEl, items) {
 }
 
 function renderSteps() {
-  const sh = cur(); const box = $('steps'); box.textContent = '';
-  if (!sh) return;
+  const sh = cur(); const box = $('steps');
+  // 다시 그려도 스크롤 위치 유지 (사이드 패널 + 열 목록)
+  const side = $('side'); const sideTop = side.scrollTop;
+  box.style.minHeight = box.offsetHeight + 'px';
+  box.textContent = '';
+  if (!sh) { box.style.minHeight = ''; return; }
   sh.steps.forEach((st, i) => {
     const def = STEP_DEFS[st.type]; const info = S.stepInfo[i] || {};
     const cols = info.inCols || [];
@@ -1217,6 +1220,12 @@ function renderSteps() {
     }
     box.append(card);
   });
+  box.querySelectorAll('[data-keep-scroll]').forEach((el) => {
+    const st = sh.steps[+el.closest('.step').dataset.i];
+    if (st && st._scroll) el.scrollTop = st._scroll;
+  });
+  box.style.minHeight = '';
+  side.scrollTop = sideTop;
   updateStepMeta();
 }
 function updateStepMeta() {
