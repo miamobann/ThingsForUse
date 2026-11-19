@@ -1,0 +1,1335 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>이미지 추출 편집기</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+:root{
+  --bg:#f4f5f7; --panel:#ffffff; --line:#dfe2e7; --line2:#eceef1;
+  --text:#1d2330; --muted:#677084; --accent:#2f6feb; --accent-soft:#e8f0ff;
+  --warn:#b25e00; --danger:#c62f2f; --ok:#1d8a4a; --radius:8px;
+  --chk1:#ffffff; --chk2:#e3e6ea;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#15181d; --panel:#1e2228; --line:#343a43; --line2:#2a2f36;
+    --text:#e6e9ee; --muted:#9aa3b2; --accent:#5b8ff9; --accent-soft:#22324f;
+    --warn:#e3a14a; --danger:#f07070; --ok:#5cc98a; --chk1:#2a2f36; --chk2:#20242a;
+  }
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--text);font:14px/1.45 "Segoe UI","맑은 고딕","Malgun Gothic",system-ui,sans-serif}
+button,select,input,textarea{font:inherit;color:inherit}
+button{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:5px 10px;cursor:pointer;white-space:nowrap}
+button:hover:not(:disabled){border-color:var(--muted)}
+button:disabled{opacity:.45;cursor:default}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+button.accent{background:var(--accent-soft);border-color:var(--accent);color:var(--accent);font-weight:600}
+button.on{background:var(--accent);border-color:var(--accent);color:#fff}
+input[type=text],input[type=url],input[type=number],select,textarea{border:1px solid var(--line);border-radius:6px;padding:5px 8px;background:var(--panel);min-width:0}
+textarea{resize:vertical;width:100%;font:12px/1.4 Consolas,monospace}
+input:focus,select:focus,textarea:focus{outline:2px solid var(--accent-soft);border-color:var(--accent)}
+.hint{color:var(--muted);font-size:12.5px;margin:4px 0 0}
+a{color:var(--accent)}
+
+.topbar{display:flex;align-items:center;gap:8px;padding:10px 14px;background:var(--panel);border-bottom:1px solid var(--line);flex-wrap:wrap}
+.brand{font-weight:700;font-size:15px;margin-right:6px}
+#url{flex:1;min-width:220px}
+.bar2{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:8px 14px;border-bottom:1px solid var(--line2);background:var(--panel)}
+.bar2 label{display:flex;gap:5px;align-items:center;color:var(--muted);font-size:13px}
+.bar2 .sp{flex:1}
+#status{font-size:13px;color:var(--muted)}
+#status.err{color:var(--danger)}
+
+.panel{margin:12px 14px;padding:12px;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius)}
+.panel h3{margin:0 0 6px;font-size:14px}
+.bm{display:inline-block;padding:4px 10px;border:1px dashed var(--accent);border-radius:6px;text-decoration:none;font-weight:600}
+
+#drop{margin:12px 14px;border:2px dashed var(--line);border-radius:var(--radius);padding:14px;text-align:center;color:var(--muted)}
+#drop.over{border-color:var(--accent);background:var(--accent-soft)}
+
+#grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px;padding:4px 14px 30px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;display:flex;flex-direction:column;position:relative}
+.card.sel{outline:2px solid var(--accent)}
+.card .th{aspect-ratio:1;display:flex;align-items:center;justify-content:center;cursor:pointer;
+  background:repeating-conic-gradient(var(--chk1) 0 25%,var(--chk2) 0 50%) 0 0/16px 16px}
+.card .th img{max-width:100%;max-height:100%;object-fit:contain}
+.card .meta{padding:6px 8px;font-size:12px;color:var(--muted);display:flex;gap:6px;align-items:center}
+.card .meta span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.card .ck{position:absolute;top:6px;left:6px;width:18px;height:18px;accent-color:var(--accent)}
+.card .acts{display:flex;border-top:1px solid var(--line2)}
+.card .acts button{flex:1;border:0;border-radius:0;padding:6px 0;font-size:12.5px}
+.card .acts button+button{border-left:1px solid var(--line2)}
+.empty{grid-column:1/-1;text-align:center;color:var(--muted);padding:40px 0}
+
+/* editor */
+#editor{position:fixed;inset:0;background:var(--bg);display:flex;flex-direction:column;z-index:10}
+#editor .etop{display:flex;gap:6px;align-items:center;padding:8px 12px;background:var(--panel);border-bottom:1px solid var(--line);flex-wrap:wrap}
+#editor .etop .sp{flex:1}
+#editor .ebody{flex:1;display:flex;min-height:0}
+#side{width:270px;overflow:auto;background:var(--panel);border-right:1px solid var(--line);padding:10px 12px}
+#side h4{margin:14px 0 6px;font-size:12.5px;color:var(--muted);font-weight:600}
+#side h4:first-child{margin-top:0}
+#side .row{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px;align-items:center}
+#side .row button{flex:1}
+#side label.sl{display:grid;grid-template-columns:52px 1fr 36px;align-items:center;gap:6px;font-size:12.5px;margin:3px 0}
+#side input[type=range]{width:100%;accent-color:var(--accent)}
+#side input[type=number]{width:72px}
+#stage{flex:1;display:flex;overflow:auto;padding:16px;position:relative;cursor:grab}
+#stage.panning{cursor:grabbing}
+.zoombox{display:flex;align-items:center;gap:2px}
+.zoombox button{padding:3px 8px}
+#zoomV{min-width:48px;text-align:center;font-size:12.5px;color:var(--muted);cursor:pointer}
+#stage.chk .wrap{background:repeating-conic-gradient(#fff 0 25%,#d9dce1 0 50%) 0 0/20px 20px}
+#stage.white .wrap{background:#fff}
+#stage.black .wrap{background:#000}
+.wrap{position:relative;line-height:0;box-shadow:0 2px 10px rgba(0,0,0,.18);margin:auto;flex-shrink:0}
+#cv{display:block}
+#cv.pix{image-rendering:pixelated}
+#ov{position:absolute;inset:0;width:100%;height:100%;cursor:crosshair}
+#busy{position:fixed;inset:0;background:rgba(0,0,0,.45);color:#fff;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:10px;font-size:15px;z-index:2}
+#busy .pb{width:260px;height:6px;background:rgba(255,255,255,.25);border-radius:3px;overflow:hidden}
+#busy .pb i{display:block;height:100%;width:0;background:#fff;transition:width .2s}
+#einfo{font-size:12.5px;color:var(--muted)}
+
+@media (max-width:760px){
+  #editor .ebody{flex-direction:column}
+  #side{width:auto;max-height:42vh;border-right:0;border-bottom:1px solid var(--line)}
+}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <span class="brand">🖼️ 이미지 추출 편집기</span>
+  <input id="url" type="url" placeholder="https://example.com — 이미지를 가져올 웹페이지 주소">
+  <button id="go" class="primary">이미지 추출</button>
+  <button id="togglePaste">소스/주소 붙여넣기</button>
+  <button id="toggleHelp">도움말</button>
+</div>
+
+<div class="bar2">
+  <label>최소 크기 <input id="minSize" type="number" value="50" min="0" step="10" style="width:70px">px</label>
+  <label><input id="hideBroken" type="checkbox" checked> 깨진 이미지 숨김</label>
+  <span id="status"></span>
+  <span class="sp"></span>
+  <button id="selAll">전체 선택</button>
+  <button id="selNone">선택 해제</button>
+  <button id="dlSel" class="accent">선택 항목 ZIP 다운로드</button>
+  <button id="clearAll">목록 비우기</button>
+</div>
+
+<div id="fileWarn" class="panel" hidden style="border-color:var(--warn)">
+  ⚠️ 지금은 파일을 직접 연 상태라 <b>공개 프록시</b>(불안정)를 거쳐 페이지를 가져옵니다.
+  같은 폴더의 <b>이미지추출편집기-실행.bat</b>을 더블클릭해서 열면 내 컴퓨터가 직접 가져오므로 훨씬 잘 됩니다.
+</div>
+
+<div id="pastePanel" class="panel" hidden>
+  <h3>페이지 소스 또는 이미지 주소 붙여넣기</h3>
+  <textarea id="pasteBox" rows="6" placeholder="① 대상 페이지에서 Ctrl+U → 전체 복사 → 여기에 붙여넣기 &#10;② 또는 아래 북마클릿으로 복사한 이미지 주소 목록을 붙여넣기"></textarea>
+  <div style="display:flex;gap:8px;margin-top:8px;align-items:center;flex-wrap:wrap">
+    <button id="parsePaste" class="primary">붙여넣은 내용에서 추출</button>
+    <span class="hint">상대 경로는 위 주소창의 URL을 기준으로 해석합니다.</span>
+  </div>
+</div>
+
+<div id="helpPanel" class="panel" hidden>
+  <h3>사용 방법</h3>
+  <p class="hint" style="font-size:13px">
+  <b>1. 주소로 추출</b> — 주소를 넣고 [이미지 추출]. <b>이미지추출편집기-실행.bat</b>으로 열면 내 컴퓨터가 직접 페이지를 가져옵니다(권장). HTML 파일만 직접 열면 공개 프록시를 거치며, 잘 안 될 수 있습니다.<br>
+  <b>2. 로그인이 필요하거나 스크립트로 그려지는 페이지</b> — 아래 버튼을 브라우저 북마크바로 끌어다 놓고, 대상 페이지에서 그 북마크를 클릭하세요. 이미지 주소가 복사되면 [소스/주소 붙여넣기]에 붙여넣습니다.<br>
+  &nbsp;&nbsp;&nbsp;<a id="bookmarklet" class="bm" href="#">📋 이미지 주소 복사</a><br>
+  <b>3. 직접 넣기</b> — 이미지 파일을 끌어다 놓거나, 화면 캡처 후 Ctrl+V.<br>
+  <b>4. 편집</b> — 썸네일을 클릭하면 편집기가 열립니다: 자르기 · 회전 · 반전 · 크기 · 밝기/대비/채도 · AI 누끼 · 색 지우기 · 지우개/복원 브러시.<br>
+  AI 누끼는 처음 한 번 모델(약 40~80MB)을 내려받고, 이후 이미지는 <b>내 컴퓨터 안에서</b> 처리됩니다.
+  </p>
+  <label class="hint" style="display:flex;gap:6px;align-items:center;margin-top:8px">사용자 프록시 (선택, URL 앞에 붙는 주소):
+    <input id="customProxy" type="text" placeholder="예: https://my-proxy.example/?url=" style="flex:1"></label>
+</div>
+
+<div id="drop">이미지 파일을 여기로 끌어다 놓거나 <b>Ctrl+V</b>로 붙여넣기 · <label style="color:var(--accent);cursor:pointer;text-decoration:underline">파일 열기<input id="fileIn" type="file" accept="image/*" multiple hidden></label></div>
+
+<div id="grid"><div class="empty">웹페이지 주소를 넣고 [이미지 추출]을 눌러 보세요.</div></div>
+
+<!-- ============ EDITOR ============ -->
+<div id="editor" hidden>
+  <div class="etop">
+    <button id="eClose">← 목록</button>
+    <button id="eUndo" title="Ctrl+Z">↶ 되돌리기</button>
+    <button id="eRedo" title="Ctrl+Y">↷ 다시</button>
+    <button id="eReset">원본으로</button>
+    <span id="einfo"></span>
+    <span class="sp"></span>
+    <span class="zoombox" title="마우스 휠: 확대/축소 · 드래그(또는 휠 클릭 드래그): 이동">
+      <button id="zoomOut">−</button><span id="zoomV" title="클릭: 화면 맞춤">100%</span><button id="zoomIn">+</button>
+      <button id="zoomFit">맞춤</button><button id="zoom100">1:1</button>
+    </span>
+    <label class="hint">배경
+      <select id="bgView"><option value="chk">체크무늬</option><option value="white">흰색</option><option value="black">검정</option></select></label>
+    <select id="fmt"><option value="png">PNG (투명 유지)</option><option value="jpeg">JPG</option><option value="webp">WebP</option></select>
+    <button id="eCopy">클립보드 복사</button>
+    <button id="eSaveAs" title="Ctrl+Shift+S">다른 이름으로 저장</button>
+    <button id="eSave" class="primary">저장</button>
+  </div>
+  <div class="ebody">
+    <div id="side">
+      <h4>✂️ 누끼 (배경 제거)</h4>
+      <div class="row"><button id="aiBg" class="accent">AI 자동 선택</button></div>
+      <div class="row"><select id="aiModel" style="flex:1">
+        <option value="isnet_fp16">AI 모델: 표준 (빠름, 약 80MB)</option>
+        <option value="isnet">AI 모델: 고품질 (느림, 약 170MB)</option>
+      </select></div>
+      <label class="hint" style="display:flex;gap:5px;align-items:center"><input id="aiBoost" type="checkbox"> 배경과 색이 비슷할 때 (대비 강화)</label>
+      <p class="hint">💡 [자르기 영역 선택]으로 제품을 먼저 감싸 두면 그 안에서만 누끼를 따서 더 정확합니다.</p>
+      <div class="row"><button data-tool="sam">🎯 클릭으로 물체 선택 (AI)</button></div>
+      <div id="samRow" hidden>
+        <p class="hint">남길 물체를 <b>클릭</b>하세요. 빠진 부분은 더 클릭, 잘못 잡힌 곳은 <b>우클릭</b>(또는 Shift+클릭)으로 제외합니다.</p>
+        <div class="row"><button id="samKeep" class="primary">이 물체 남기기 →</button><button id="samCut">이 물체 지우기 →</button></div>
+        <div class="row"><button id="samClear">점 초기화</button></div>
+      </div>
+      <div id="maskPanel" hidden style="border:1.5px solid var(--accent);border-radius:8px;padding:8px;margin:8px 0;background:var(--accent-soft)">
+        <p class="hint" style="margin:0 0 6px;color:var(--text)"><b>마스크 확인 중</b> — 노란 선 안쪽(밝은 부분)이 남습니다. 브러시로 고친 뒤 [누끼 실행]을 누르세요.</p>
+        <div class="row"><button data-tool="mAdd">➕ 포함 브러시</button><button data-tool="mSub">➖ 제외 브러시</button></div>
+        <p class="hint" style="margin:0 0 6px">브러시 크기·부드럽기는 아래 [다듬기 브러시]에서 · Ctrl+Z로 마스크 되돌리기</p>
+        <div class="row"><button id="maskInvert">반전</button><button id="maskCancel">취소</button></div>
+        <div class="row"><button id="maskRun" class="primary">✅ 누끼 실행</button></div>
+      </div>
+      <h4>🪄 테두리 다듬기</h4>
+      <label class="sl">안쪽으로<input id="edgeShrink" type="range" min="0" max="6" step="1" value="1"><span id="edgeShrinkV">1px</span></label>
+      <label class="sl">부드럽게<input id="edgeFeather" type="range" min="0" max="8" step="0.5" value="1.5"><span id="edgeFeatherV">1.5px</span></label>
+      <p class="hint" id="edgeHint">누끼 직후 슬라이더를 움직이면 바로 반영됩니다. '안쪽으로'는 테두리에 남은 배경색 띠를 깎아냅니다.</p>
+      <div class="row" style="margin-top:8px"><button id="tWand" data-tool="wand">색 지우기 (클릭)</button></div>
+      <label class="sl">허용 오차<input id="tol" type="range" min="0" max="120" value="32"><span id="tolV">32</span></label>
+      <label class="hint" style="display:flex;gap:5px;align-items:center"><input id="wandCont" type="checkbox" checked> 이어진 영역만</label>
+
+      <h4>🖌️ 다듬기 브러시</h4>
+      <div class="row"><button data-tool="erase">지우개</button><button data-tool="restore">복원</button></div>
+      <label class="sl">크기<input id="brush" type="range" min="2" max="200" value="30"><span id="brushV">30</span></label>
+      <label class="sl">부드럽게<input id="soft" type="range" min="0" max="100" value="25"><span id="softV">25</span></label>
+      <p class="hint">복원 브러시는 누끼 전 픽셀을 다시 그립니다.</p>
+
+      <h4>📐 자르기 · 회전</h4>
+      <div class="row"><button data-tool="crop">자르기 영역 선택</button></div>
+      <div class="row" id="cropRow" hidden><button id="cropApply" class="primary">자르기 적용</button><button id="cropCancel">취소</button></div>
+      <div class="row"><button id="trimBtn" title="투명한 가장자리 잘라내기">투명 여백 자르기</button></div>
+      <div class="row"><button id="rotL">⟲ 90°</button><button id="rotR">⟳ 90°</button></div>
+      <div class="row"><button id="flipH">⇋ 좌우</button><button id="flipV">⇵ 상하</button></div>
+      <label class="sl">기울기<input id="tilt" type="range" min="-45" max="45" step="0.1" value="0"><input id="tiltN" type="number" min="-45" max="45" step="0.1" value="0" style="width:58px;padding:2px 4px"></label>
+      <label class="hint" style="display:flex;gap:5px;align-items:center"><input id="tiltCrop" type="checkbox" checked> 빈 모서리 잘라내기</label>
+      <div class="row"><button id="tiltApply">기울기 적용</button><button id="tiltReset">0°</button></div>
+
+      <h4>📏 크기 조절</h4>
+      <div class="row"><input id="rw" type="number" min="1"> × <input id="rh" type="number" min="1"></div>
+      <div class="row"><label class="hint" style="display:flex;gap:4px;align-items:center"><input id="keepRatio" type="checkbox" checked> 비율 유지</label><button id="resizeApply">적용</button></div>
+
+      <h4>🎨 색 보정</h4>
+      <label class="sl">밝기<input id="fBright" type="range" min="0" max="200" value="100"><span>100</span></label>
+      <label class="sl">대비<input id="fContrast" type="range" min="0" max="200" value="100"><span>100</span></label>
+      <label class="sl">채도<input id="fSat" type="range" min="0" max="200" value="100"><span>100</span></label>
+      <label class="sl">흐림<input id="fBlur" type="range" min="0" max="20" value="0"><span>0</span></label>
+      <label class="sl">흑백<input id="fGray" type="range" min="0" max="100" value="0"><span>0</span></label>
+      <div class="row"><button id="fApply">보정 적용</button><button id="fReset">초기화</button></div>
+    </div>
+    <div id="stage" class="chk">
+      <div class="wrap"><canvas id="cv"></canvas><canvas id="ov"></canvas></div>
+      <div id="busy" hidden><div id="busyMsg">처리 중…</div><div class="pb"><i id="busyBar"></i></div></div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ================= 공통 ================= */
+const $ = s => document.querySelector(s);
+const store = {
+  get(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } },
+  set(k,v){ try{ localStorage.setItem(k,v); }catch(e){} }
+};
+function setStatus(msg, err){ const s=$('#status'); s.textContent=msg; s.className=err?'err':''; }
+
+const PROXIES = [
+  u => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u),
+  u => 'https://corsproxy.io/?url=' + encodeURIComponent(u),
+  u => 'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(u),
+];
+// 실행.bat(server.ps1)로 열면 내 컴퓨터의 로컬 프록시를 사용 — 가장 안정적
+const LOCAL = /^https?:$/.test(location.protocol) ? (u => '/proxy?url=' + encodeURIComponent(u)) : null;
+function proxyList(){
+  const c = ($('#customProxy').value||'').trim();
+  const list = c ? [u => c + encodeURIComponent(u)] : [];
+  return LOCAL ? [LOCAL, ...list] : [...list, ...PROXIES];
+}
+async function fetchTimeout(url, ms=15000){
+  const ac = new AbortController(); const t = setTimeout(()=>ac.abort(), ms);
+  try{ const r = await fetch(url,{signal:ac.signal}); if(!r.ok) throw new Error('HTTP '+r.status); return r; }
+  finally{ clearTimeout(t); }
+}
+// 직접 시도 → 프록시 순서로 시도
+async function fetchAny(url, type){
+  if(url.startsWith('data:') || url.startsWith('blob:')){ const r=await fetch(url); return type==='text'?r.text():r.blob(); }
+  // 페이지 HTML은 직접 받기가 거의 항상 막히므로 프록시부터
+  const tries = type==='text' ? [...proxyList(), u=>u] : [u=>u, ...proxyList()];
+  let lastErr;
+  for(const p of tries){
+    try{
+      const r = await fetchTimeout(p(url));
+      if(type==='text'){ const t = await r.text(); if(t.length<20) throw new Error('빈 응답'); return t; }
+      const b = await r.blob();
+      if(!b.size || /text\/html|json/.test(b.type)) throw new Error('이미지가 아님');
+      return b;
+    }catch(e){ lastErr = e; }
+  }
+  throw lastErr || new Error('가져오기 실패');
+}
+
+/* ================= 추출 ================= */
+const items = [];   // {id, url, name, w, h, el, sel, broken}
+let nextId = 1;
+
+function absUrl(u, base){
+  if(!u) return null;
+  u = u.trim().replace(/&amp;/g,'&');
+  if(!u || u.startsWith('javascript:') || u.startsWith('#')) return null;
+  if(u.startsWith('data:image') || u.startsWith('blob:')) return u;
+  try{ return new URL(u, base || undefined).href; }catch(e){ return null; }
+}
+function bestFromSrcset(ss){
+  let best=null, bestW=-1;
+  ss.split(/,\s+(?=\S)/).forEach(part=>{
+    const [u, d] = part.trim().split(/\s+/);
+    const w = d ? parseFloat(d) * (d.endsWith('x') ? 1000 : 1) : 1;
+    if(u && w > bestW){ bestW = w; best = u; }
+  });
+  return best;
+}
+function extractUrls(html, base){
+  const found = new Set();
+  const add = u => { const a = absUrl(u, base); if(a) found.add(a); };
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  const baseEl = doc.querySelector('base[href]');
+  if(baseEl){ try{ base = new URL(baseEl.getAttribute('href'), base).href; }catch(e){} }
+
+  doc.querySelectorAll('img, source, image, input[type=image]').forEach(el=>{
+    ['src','data-src','data-lazy-src','data-original','data-lazy','data-url','data-hi-res-src','data-zoom-image','href','xlink:href'].forEach(a=>{
+      const v = el.getAttribute(a); if(v && (el.tagName!=='SOURCE' || a!=='src' || true)) add(v);
+    });
+    ['srcset','data-srcset','data-lazy-srcset'].forEach(a=>{ const v=el.getAttribute(a); if(v) add(bestFromSrcset(v)); });
+  });
+  doc.querySelectorAll('meta[property="og:image"],meta[name="twitter:image"],meta[property="og:image:url"],meta[itemprop="image"]').forEach(m=>add(m.getAttribute('content')));
+  doc.querySelectorAll('link[rel~="icon"],link[rel="apple-touch-icon"],link[rel="image_src"],link[as="image"]').forEach(l=>add(l.getAttribute('href')));
+  doc.querySelectorAll('a[href]').forEach(a=>{ const h=a.getAttribute('href'); if(/\.(jpe?g|png|gif|webp|avif|svg|bmp)(\?|$)/i.test(h)) add(h); });
+  const cssText = [...doc.querySelectorAll('[style]')].map(e=>e.getAttribute('style')).join('\n') + '\n' + [...doc.querySelectorAll('style')].map(s=>s.textContent).join('\n');
+  cssText.replace(/url\(\s*['"]?([^'")]+)['"]?\s*\)/g, (m,u)=>{ add(u); return m; });
+
+  // 스크립트/JSON 안의 이미지 주소까지
+  const raw = html.replace(/\\\//g,'/').replace(/\\u002F/gi,'/');
+  raw.replace(/(?:https?:)?\/\/[^\s"'<>()\\,]+?\.(?:jpe?g|png|gif|webp|avif|svg|bmp)(?:\?[^\s"'<>()\\]*)?/gi, m=>{ add(m); return m; });
+  // 줄 단위 URL 목록 (북마클릿 결과)
+  if(!/<[a-z!]/i.test(html)) html.split(/\r?\n/).forEach(l=>{ if(/^(https?:|data:image|\/\/)/.test(l.trim())) add(l.trim()); });
+
+  return [...found].filter(u => !/\.(js|css|html?|json|woff2?|ttf)(\?|$)/i.test(u.split('#')[0]));
+}
+
+function nameFromUrl(u, i){
+  if(u.startsWith('data:')){ const m=u.match(/^data:image\/([a-z0-9+]+)/i); return 'image-'+i+'.'+(m?m[1].replace('svg+xml','svg'):'png'); }
+  try{
+    let n = decodeURIComponent(new URL(u).pathname.split('/').pop() || '');
+    n = n.replace(/[\\/:*?"<>|]/g,'_');
+    return n || ('image-'+i);
+  }catch(e){ return 'image-'+i; }
+}
+
+function addItems(urls){
+  const have = new Set(items.map(i=>i.url));
+  let added = 0;
+  urls.forEach(u=>{
+    if(have.has(u)) return; have.add(u);
+    const it = { id: nextId++, url: u, name: nameFromUrl(u, nextId), w:0, h:0, sel:false, broken:false, proxied:false };
+    items.push(it); added++;
+  });
+  render();
+  return added;
+}
+
+async function extractFromUrl(){
+  let u = $('#url').value.trim();
+  if(!u){ $('#url').focus(); return; }
+  if(!/^https?:\/\//i.test(u)){ u = 'https://' + u; $('#url').value = u; }
+  store.set('lastUrl', u);
+  setStatus('페이지를 가져오는 중…');
+  $('#go').disabled = true;
+  try{
+    const html = await fetchAny(u, 'text');
+    const urls = extractUrls(html, u);
+    const n = addItems(urls);
+    setStatus(`${urls.length}개 주소 발견 · ${n}개 추가됨. 작은/깨진 이미지는 필터로 숨겨집니다.`);
+    if(!urls.length) setStatus('이미지를 찾지 못했습니다. 스크립트로 그려지는 페이지라면 도움말의 북마클릿을 써 보세요.', true);
+  }catch(e){
+    setStatus('페이지를 가져오지 못했습니다 ('+e.message+'). 도움말의 북마클릿 또는 소스 붙여넣기를 이용하세요.', true);
+    $('#pastePanel').hidden = false;
+  }finally{ $('#go').disabled = false; }
+}
+
+/* ================= 갤러리 ================= */
+function visible(it){
+  if(it.broken && $('#hideBroken').checked) return false;
+  const min = +$('#minSize').value || 0;
+  if(it.w && it.h && it.w < min && it.h < min) return false;
+  return true;
+}
+function render(){
+  const g = $('#grid');
+  if(!items.length){ g.innerHTML = '<div class="empty">웹페이지 주소를 넣고 [이미지 추출]을 눌러 보세요.</div>'; return; }
+  const empty = g.querySelector('.empty'); if(empty) empty.remove();
+  items.forEach(it=>{
+    if(!it.el){
+      const c = document.createElement('div'); c.className='card';
+      c.innerHTML = `<input type="checkbox" class="ck"><div class="th"><img loading="lazy" referrerpolicy="no-referrer" alt=""></div>
+        <div class="meta"><span></span><b class="dim"></b></div>
+        <div class="acts"><button data-a="edit">편집</button><button data-a="save">저장</button><button data-a="open">원본</button></div>`;
+      const img = c.querySelector('img');
+      img.onload = ()=>{ it.w = img.naturalWidth; it.h = img.naturalHeight; it.broken=false; updateCard(it); };
+      img.onerror = ()=>{
+        if(!it.proxied && !it.url.startsWith('data:') && !it.url.startsWith('blob:')){ it.proxied = true; img.src = proxyList()[0](it.url); return; }
+        it.broken = true; updateCard(it);
+      };
+      img.src = it.url;
+      c.querySelector('.ck').onchange = e => { it.sel = e.target.checked; updateCard(it); };
+      c.querySelector('.th').onclick = () => openEditor(it);
+      c.querySelector('.acts').onclick = e => {
+        const a = e.target.dataset.a;
+        if(a==='edit') openEditor(it);
+        else if(a==='save') saveItem(it);
+        else if(a==='open') window.open(it.url, '_blank', 'noopener');
+      };
+      it.el = c; g.appendChild(c);
+    }
+    updateCard(it);
+  });
+  updateCount();
+}
+function updateCard(it){
+  const c = it.el; if(!c) return;
+  c.hidden = !visible(it);
+  c.classList.toggle('sel', it.sel);
+  c.querySelector('.ck').checked = it.sel;
+  c.querySelector('.meta span').textContent = it.name; c.querySelector('.meta span').title = it.url.length>300 ? it.name : it.url;
+  c.querySelector('.dim').textContent = it.broken ? '깨짐' : (it.w ? `${it.w}×${it.h}` : '…');
+  updateCount();
+}
+let countTimer;
+function updateCount(){
+  clearTimeout(countTimer);
+  countTimer = setTimeout(()=>{
+    const vis = items.filter(visible).length, sel = items.filter(i=>i.sel && visible(i)).length;
+    $('#dlSel').textContent = sel ? `선택 ${sel}개 ZIP 다운로드` : '선택 항목 ZIP 다운로드';
+    $('#dlSel').disabled = !sel;
+    if(items.length && !/가져오|실패|못했/.test($('#status').textContent)) setStatus(`이미지 ${vis}개 표시 중 (전체 ${items.length}개)`);
+  }, 120);
+}
+function downloadBlob(blob, name){
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href), 5000);
+}
+function extFor(type){ return ({ 'image/jpeg':'jpg','image/png':'png','image/gif':'gif','image/webp':'webp','image/svg+xml':'svg','image/avif':'avif','image/bmp':'bmp','image/x-icon':'ico','image/vnd.microsoft.icon':'ico' })[type] || 'png'; }
+function fixName(name, type){ return /\.[a-z0-9]{2,5}$/i.test(name) ? name : name + '.' + extFor(type); }
+async function saveItem(it){
+  setStatus('내려받는 중… '+it.name);
+  try{ const b = await fetchAny(it.url,'blob'); downloadBlob(b, fixName(it.name, b.type)); setStatus('저장됨: '+it.name); }
+  catch(e){ setStatus('저장 실패: '+e.message+' — [원본]을 눌러 새 탭에서 직접 저장해 보세요.', true); }
+}
+async function downloadSelected(){
+  const sel = items.filter(i=>i.sel && visible(i)); if(!sel.length) return;
+  if(sel.length === 1) return saveItem(sel[0]);
+  if(!window.JSZip){ setStatus('ZIP 라이브러리를 불러오지 못했습니다(인터넷 연결 확인).', true); return; }
+  const zip = new JSZip(), used = new Set(); let ok = 0, fail = 0;
+  $('#dlSel').disabled = true;
+  for(const [i,it] of sel.entries()){
+    setStatus(`ZIP 만드는 중… ${i+1}/${sel.length}`);
+    try{
+      const b = await fetchAny(it.url,'blob');
+      let n = fixName(it.name, b.type), k = 1;
+      while(used.has(n.toLowerCase())) n = n.replace(/(\.[^.]+)?$/, m=>`(${k++})`+m);
+      used.add(n.toLowerCase()); zip.file(n, b); ok++;
+    }catch(e){ fail++; }
+  }
+  if(ok){ const blob = await zip.generateAsync({type:'blob'}); let host='images'; try{ host=new URL($('#url').value).hostname; }catch(e){} downloadBlob(blob, host+'.zip'); }
+  setStatus(`ZIP 완료: ${ok}개 성공${fail?`, ${fail}개 실패`:''}`, !ok);
+  $('#dlSel').disabled = false;
+}
+
+/* 로컬 파일 / 붙여넣기 */
+function addFiles(files){
+  const urls = [];
+  [...files].forEach(f=>{
+    if(!f.type.startsWith('image/')) return;
+    const u = URL.createObjectURL(f); urls.push(u);
+    setTimeout(()=>{ const it = items.find(i=>i.url===u); if(it){ it.name = f.name || ('붙여넣기-'+it.id+'.png'); updateCard(it); } });
+  });
+  if(urls.length){ addItems(urls); setStatus(urls.length+'개 이미지 추가됨'); }
+}
+
+/* ================= 에디터 ================= */
+const cv = $('#cv'), ctx = cv.getContext('2d', {willReadFrequently:true});
+const ov = $('#ov'), octx = ov.getContext('2d');
+let restoreCv = document.createElement('canvas');   // 복원 브러시용 원본 픽셀
+let originalCv = document.createElement('canvas');  // '원본으로'
+let curItem = null, tool = null, undoStack = [], redoStack = [];
+let cropRect = null, drag = null, mouse = null;
+
+function cloneCanvas(src){ const c=document.createElement('canvas'); c.width=src.width; c.height=src.height; c.getContext('2d').drawImage(src,0,0); return c; }
+let editVersion = 0;   // 캔버스가 통째로 바뀔 때마다 증가 (물체 선택 AI 분석 결과 무효화용)
+function setCanvas(src){ editVersion++; refine = null; if(pend) endMask(); cv.width = src.width; cv.height = src.height; ctx.clearRect(0,0,cv.width,cv.height); ctx.drawImage(src,0,0); afterChange(); }
+function snapshot(){ return { img: cloneCanvas(cv), rest: cloneCanvas(restoreCv) }; }
+function pushUndo(){ refine = null; bakeFilters(); if(tiltDeg()) applyTilt(); undoStack.push(snapshot()); if(undoStack.length>30) undoStack.shift(); redoStack = []; updUndo(); }
+function updUndo(){ $('#eUndo').disabled = !undoStack.length; $('#eRedo').disabled = !redoStack.length; }
+function restoreSnap(s){ restoreCv = s.rest; setCanvas(s.img); }
+function undo(){ if(maskUndo()) return; if(!undoStack.length) return; resetFilterUI(); redoStack.push(snapshot()); restoreSnap(undoStack.pop()); updUndo(); }
+function redo(){ if(!redoStack.length) return; undoStack.push(snapshot()); restoreSnap(redoStack.pop()); updUndo(); }
+function afterChange(){
+  $('#einfo').textContent = `${curItem ? curItem.name : ''} · ${cv.width}×${cv.height}px`;
+  $('#rw').value = cv.width; $('#rh').value = cv.height;
+  layoutCanvas();
+}
+
+/* 확대/축소: zoom은 '화면 맞춤' 크기 대비 배율 */
+let zoom = 1;
+function fitScale(){
+  const st = $('#stage');
+  const f = Math.min(1, (st.clientWidth-32)/cv.width, (st.clientHeight-32)/cv.height);
+  return f > 0.01 ? f : (f > 0 ? 0.01 : (st.clientWidth > 0 ? 0.01 : 1));
+}
+function layoutCanvas(){
+  const s = fitScale() * zoom;
+  cv.style.width = Math.max(1, cv.width*s) + 'px';
+  cv.style.height = Math.max(1, cv.height*s) + 'px';
+  cv.classList.toggle('pix', s >= 3);
+  $('#zoomV').textContent = Math.round(s*100) + '%';
+  previewFilters(); drawOverlay();
+}
+// 화면 좌표(cx,cy) 아래의 픽셀이 확대 후에도 같은 자리에 있도록
+function setZoom(z, cx, cy){
+  const st = $('#stage'), r = cv.getBoundingClientRect();
+  if(cx == null){ const sr = st.getBoundingClientRect(); cx = sr.left + sr.width/2; cy = sr.top + sr.height/2; }
+  const fx = (cx - r.left)/r.width, fy = (cy - r.top)/r.height;
+  const fit = fitScale();
+  zoom = Math.min(32/fit, Math.max(0.1, z));
+  layoutCanvas();
+  const r2 = cv.getBoundingClientRect();
+  st.scrollLeft += (r2.left + fx*r2.width) - cx;
+  st.scrollTop  += (r2.top + fy*r2.height) - cy;
+}
+// 지오메트리 변환은 복원용 캔버스에도 동일하게 적용
+function transformBoth(fn){
+  pushUndo();
+  const a = fn(cv), b = fn(restoreCv);
+  restoreCv = b; setCanvas(a);
+}
+
+function busy(on, msg, pct){
+  $('#busy').hidden = !on;
+  if(msg) $('#busyMsg').textContent = msg;
+  $('#busyBar').style.width = (pct==null ? 0 : pct) + '%';
+}
+
+async function loadImageToCanvas(it){
+  const blob = await fetchAny(it.url, 'blob');
+  let bmp;
+  try{ bmp = await createImageBitmap(blob); }
+  catch(e){ // SVG 등
+    bmp = await new Promise((res,rej)=>{ const im=new Image(); im.onload=()=>res(im); im.onerror=()=>rej(new Error('이미지를 열 수 없음')); im.src=URL.createObjectURL(blob); });
+  }
+  let w = bmp.width || 512, h = bmp.height || 512;
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  c.getContext('2d').drawImage(bmp, 0, 0, w, h);
+  return c;
+}
+
+async function openEditor(it){
+  curItem = it;
+  $('#editor').hidden = false; document.body.style.overflow='hidden';
+  undoStack = []; redoStack = []; updUndo(); $('#tilt').value = 0; setTiltUI(0); setTool(null); resetFilterUI(); zoom = 1;
+  cv.width = 1; cv.height = 1;
+  busy(true, '이미지 불러오는 중…');
+  try{
+    const c = await loadImageToCanvas(it);
+    originalCv = c; restoreCv = cloneCanvas(c); setCanvas(c);
+    busy(false);
+  }catch(e){
+    busy(false); closeEditor();
+    setStatus('편집용으로 이미지를 가져오지 못했습니다: '+e.message, true);
+  }
+}
+function closeEditor(){ $('#editor').hidden = true; document.body.style.overflow=''; setTool(null); }
+
+/* 도구 */
+function setTool(t){
+  if(t && tiltDeg()) applyTilt();   // 미리보기 중인 기울기를 먼저 반영
+  tool = (tool === t) ? null : t;
+  document.querySelectorAll('#side [data-tool]').forEach(b=>b.classList.toggle('on', b.dataset.tool===tool));
+  $('#cropRow').hidden = tool!=='crop';
+  if(tool!=='crop') cropRect = null;
+  $('#samRow').hidden = tool!=='sam';
+  if(tool!=='sam'){ samPts = []; samMask = null; }
+  else samQueue(()=>samEnsure());   // 미리 이미지 분석
+  ov.style.cursor = tool==='crop' || tool==='sam' ? 'crosshair' : (tool==='wand' ? 'cell' : (tool ? 'none' : 'default'));
+  // 마스크 확인 중에는 지우개/복원 대신 마스크 브러시로
+  if(pend && (tool==='erase' || tool==='restore')){ const t2 = tool==='erase' ? 'mSub' : 'mAdd'; tool = null; return setTool(t2); }
+  if(!pend && (tool==='mAdd' || tool==='mSub')){ tool = null; return setTool(null); }
+  ov.style.pointerEvents = tool ? 'auto' : 'none';
+  drawOverlay();
+}
+function toImg(e){
+  const r = cv.getBoundingClientRect();
+  return { x: (e.clientX - r.left) * cv.width / r.width, y: (e.clientY - r.top) * cv.height / r.height, scale: cv.width / r.width };
+}
+function drawOverlay(){
+  const r = cv.getBoundingClientRect(), dpr = devicePixelRatio || 1;
+  ov.width = Math.max(1, Math.round(r.width*dpr)); ov.height = Math.max(1, Math.round(r.height*dpr));
+  octx.setTransform(dpr*r.width/cv.width, 0, 0, dpr*r.height/cv.height, 0, 0);
+  octx.clearRect(0,0,cv.width,cv.height);
+  const px = cv.width / r.width;
+  drawTiltGuide(px);
+  if(pend && tool!=='sam') octx.drawImage(pend.prevCv, 0, 0, cv.width, cv.height);
+  if(tool==='sam'){
+    if(samMask && samMaskCv) octx.drawImage(samMaskCv, 0, 0, cv.width, cv.height);
+    samPts.forEach(p=>{
+      octx.beginPath(); octx.arc(p.x, p.y, 6*px, 0, Math.PI*2);
+      octx.fillStyle = p.label ? '#22c55e' : '#ef4444'; octx.fill();
+      octx.lineWidth = 2*px; octx.strokeStyle = '#fff'; octx.stroke();
+      octx.fillStyle = '#fff'; octx.font = `bold ${10*px}px sans-serif`; octx.textAlign='center'; octx.textBaseline='middle';
+      octx.fillText(p.label ? '+' : '−', p.x, p.y + 0.5*px);
+    });
+  }
+  if(tool==='crop' && cropRect){
+    const {x,y,w,h} = normRect(cropRect);
+    octx.fillStyle='rgba(0,0,0,.5)';
+    octx.beginPath(); octx.rect(0,0,cv.width,cv.height); octx.rect(x,y+h,w,-h); octx.fill('evenodd');
+    octx.strokeStyle='#fff'; octx.lineWidth=1.5*px; octx.setLineDash([6*px,4*px]); octx.strokeRect(x,y,w,h); octx.setLineDash([]);
+    octx.fillStyle='#fff'; octx.font=`${12*px}px sans-serif`; octx.fillText(`${Math.round(w)}×${Math.round(h)}`, x+4*px, y+14*px);
+  }
+  if((tool==='erase'||tool==='restore'||tool==='mAdd'||tool==='mSub') && mouse){
+    const rad = +$('#brush').value/2;
+    octx.lineWidth = 1.5*px;
+    octx.strokeStyle = '#000'; octx.beginPath(); octx.arc(mouse.x,mouse.y,rad,0,Math.PI*2); octx.stroke();
+    octx.strokeStyle = tool==='erase' ? '#fff' : tool==='mSub' ? '#ff6b6b' : '#5cff9a'; octx.beginPath(); octx.arc(mouse.x,mouse.y,rad+px,0,Math.PI*2); octx.stroke();
+    if(tool==='mAdd'||tool==='mSub'){ octx.fillStyle = octx.strokeStyle; octx.font=`bold ${14*px}px sans-serif`; octx.textAlign='center'; octx.textBaseline='middle'; octx.fillText(tool==='mAdd'?'+':'−', mouse.x, mouse.y); }
+  }
+}
+function normRect(r){
+  let x=Math.min(r.x0,r.x1), y=Math.min(r.y0,r.y1), w=Math.abs(r.x1-r.x0), h=Math.abs(r.y1-r.y0);
+  x=Math.max(0,x); y=Math.max(0,y); w=Math.min(cv.width-x,w); h=Math.min(cv.height-y,h);
+  return {x,y,w,h};
+}
+/* 브러시: 한 번의 획을 '마스크'에 모아 두고, 획 시작 전 이미지와 섞어서 다시 그림
+   → 도장을 겹쳐 찍어도 가장자리 반투명이 누적되지 않아 테두리가 남지 않음 */
+let stroke = null;
+const scratchA = document.createElement('canvas'), scratchB = document.createElement('canvas');
+function strokeStart(){
+  const m = document.createElement('canvas'); m.width = cv.width; m.height = cv.height;
+  stroke = { base: cloneCanvas(cv), mask: m, mctx: m.getContext('2d') };
+}
+function stamp(q, rad){
+  const m = stroke.mctx, soft = (+$('#soft').value)/100;
+  if(soft < 0.01){ m.fillStyle = '#000'; }
+  else {
+    const g = m.createRadialGradient(q.x,q.y,0,q.x,q.y,rad);
+    g.addColorStop(0,'rgba(0,0,0,1)'); g.addColorStop(Math.max(0,1-soft),'rgba(0,0,0,1)'); g.addColorStop(1,'rgba(0,0,0,0)');
+    m.fillStyle = g;
+  }
+  m.beginPath(); m.arc(q.x,q.y,rad,0,Math.PI*2); m.fill();
+}
+// 영역 [x,y,w,h]를 base·(1-마스크) + 복원원본·마스크 로 다시 합성
+function composeStroke(x, y, w, h){
+  x = Math.max(0, Math.floor(x)); y = Math.max(0, Math.floor(y));
+  w = Math.min(cv.width - x, Math.ceil(w)); h = Math.min(cv.height - y, Math.ceil(h));
+  if(w <= 0 || h <= 0) return;
+  const A = scratchA; A.width = w; A.height = h; const a = A.getContext('2d');
+  a.drawImage(stroke.base, x, y, w, h, 0, 0, w, h);
+  a.globalCompositeOperation = 'destination-out'; a.drawImage(stroke.mask, x, y, w, h, 0, 0, w, h);
+  ctx.clearRect(x, y, w, h);
+  ctx.drawImage(A, x, y);
+  if(tool === 'restore'){
+    const B = scratchB; B.width = w; B.height = h; const b = B.getContext('2d');
+    b.drawImage(restoreCv, x, y, w, h, 0, 0, w, h);
+    b.globalCompositeOperation = 'destination-in'; b.drawImage(stroke.mask, x, y, w, h, 0, 0, w, h);
+    ctx.globalCompositeOperation = 'lighter'; ctx.drawImage(B, x, y); ctx.globalCompositeOperation = 'source-over';
+  }
+}
+function brushAt(p, prev){
+  if(!stroke) strokeStart();
+  const rad = Math.max(1, +$('#brush').value/2);
+  const pts = [p];
+  if(prev){ const d = Math.hypot(p.x-prev.x,p.y-prev.y), n = Math.ceil(d/Math.max(1, rad/4)); for(let i=1;i<n;i++) pts.push({x:prev.x+(p.x-prev.x)*i/n, y:prev.y+(p.y-prev.y)*i/n}); }
+  let x0=Infinity, y0=Infinity, x1=-Infinity, y1=-Infinity;
+  pts.forEach(q=>{ stamp(q, rad); x0=Math.min(x0,q.x); y0=Math.min(y0,q.y); x1=Math.max(x1,q.x); y1=Math.max(y1,q.y); });
+  if(prev){ x0=Math.min(x0,prev.x); y0=Math.min(y0,prev.y); x1=Math.max(x1,prev.x); y1=Math.max(y1,prev.y); }
+  composeStroke(x0-rad-2, y0-rad-2, x1-x0+rad*2+4, y1-y0+rad*2+4);
+}
+ov.addEventListener('contextmenu', e=>{ if(tool==='sam') e.preventDefault(); });
+ov.addEventListener('pointerdown', e=>{
+  if(!tool) return;
+  if(tool==='sam' && (e.button===0 || e.button===2)){
+    e.preventDefault();
+    const p = toImg(e);
+    if(p.x<0||p.y<0||p.x>=cv.width||p.y>=cv.height) return;
+    samPts.push({ x:p.x, y:p.y, label: (e.button===2 || e.shiftKey || e.altKey) ? 0 : 1 });
+    drawOverlay();
+    samQueue(async()=>{ await samEnsure(); await samDecode(); });
+    return;
+  }
+  if(e.button !== 0) return; ov.setPointerCapture(e.pointerId);
+  const p = toImg(e);
+  if(tool==='crop'){ cropRect = {x0:p.x,y0:p.y,x1:p.x,y1:p.y}; drag = {crop:true}; }
+  else if(tool==='wand'){ pushUndo(); magicErase(Math.floor(p.x), Math.floor(p.y)); }
+  else if(tool==='mAdd' || tool==='mSub'){ maskStrokeStart(); drag = {last:p, mask:true}; maskBrushAt(p); }
+  else { pushUndo(); strokeStart(); drag = {last:p}; brushAt(p); }
+  drawOverlay();
+});
+ov.addEventListener('pointermove', e=>{
+  const p = toImg(e); mouse = p;
+  if(drag){
+    if(drag.crop){ cropRect.x1 = Math.max(0,Math.min(cv.width,p.x)); cropRect.y1 = Math.max(0,Math.min(cv.height,p.y)); }
+    else if(drag.mask){ maskBrushAt(p, drag.last); drag.last = p; }
+    else { brushAt(p, drag.last); drag.last = p; }
+  }
+  drawOverlay();
+});
+['pointerup','pointercancel'].forEach(ev=>ov.addEventListener(ev, ()=>{ drag = null; stroke = null; if(pend) pend.stroke = null; }));
+
+/* ===== 마스크 확인 모드: AI/클릭 선택 결과를 바로 적용하지 않고 마스크로 보여 준 뒤, 브러시로 고치고 한 번에 실행 ===== */
+let pend = null;   // { mask:Uint8Array(0~255), W, H, prevImg, prevCv, hist:[], stroke }
+function startMask(mask){
+  const W = cv.width, H = cv.height;
+  const prevCv = document.createElement('canvas'); prevCv.width = W; prevCv.height = H;
+  pend = { mask, W, H, prevCv, prevImg: prevCv.getContext('2d').createImageData(W, H), hist: [], stroke: null };
+  paintMaskPreview(0, 0, W, H);
+  $('#maskPanel').hidden = false;
+  if(tool) setTool(null); else drawOverlay();
+  $('#maskPanel').scrollIntoView({block:'nearest'});
+}
+function endMask(){
+  pend = null; $('#maskPanel').hidden = true;
+  if(tool==='mAdd' || tool==='mSub') setTool(null); else drawOverlay();
+}
+// 미리보기: 남지 않을 곳은 어둡게, 경계는 노란 선
+function paintMaskPreview(x0, y0, x1, y1){
+  const { mask:m, W, H, prevImg } = pend, d = prevImg.data;
+  x0 = Math.max(0, Math.floor(x0)-1); y0 = Math.max(0, Math.floor(y0)-1);
+  x1 = Math.min(W, Math.ceil(x1)+1);  y1 = Math.min(H, Math.ceil(y1)+1);
+  if(x1<=x0 || y1<=y0) return;
+  for(let y=y0;y<y1;y++) for(let x=x0;x<x1;x++){
+    const i = y*W + x, v = m[i], o = i*4, inside = v >= 128;
+    const edge = inside && (x===0 || y===0 || x===W-1 || y===H-1 || m[i-1]<128 || m[i+1]<128 || m[i-W]<128 || m[i+W]<128);
+    if(edge){ d[o]=255; d[o+1]=230; d[o+2]=0; d[o+3]=255; }
+    else { d[o]=0; d[o+1]=0; d[o+2]=0; d[o+3]=Math.round((255-v)*0.62); }
+  }
+  pend.prevCv.getContext('2d').putImageData(prevImg, 0, 0, x0, y0, x1-x0, y1-y0);
+}
+function maskStrokeStart(){
+  pend.hist.push(pend.mask.slice()); if(pend.hist.length > 30) pend.hist.shift();
+  pend.stroke = { base: pend.mask.slice(), cov: new Uint8Array(pend.W*pend.H), add: tool==='mAdd' };
+}
+// 한 획 안에서는 '덮인 정도'의 최댓값만 기억 → 겹쳐 칠해도 테두리 무늬가 생기지 않음
+function maskBrushAt(p, prev){
+  if(!pend || !pend.stroke) return;
+  const { W, H } = pend, s = pend.stroke, rad = Math.max(1, +$('#brush').value/2), soft = (+$('#soft').value)/100;
+  const pts = [p];
+  if(prev){ const dd = Math.hypot(p.x-prev.x,p.y-prev.y), n = Math.ceil(dd/Math.max(1, rad/4)); for(let i=1;i<n;i++) pts.push({x:prev.x+(p.x-prev.x)*i/n, y:prev.y+(p.y-prev.y)*i/n}); }
+  let bx0=W, by0=H, bx1=0, by1=0;
+  const inner = rad*(1-soft);
+  for(const q of pts){
+    const x0=Math.max(0,Math.floor(q.x-rad-1)), x1=Math.min(W,Math.ceil(q.x+rad+1)), y0=Math.max(0,Math.floor(q.y-rad-1)), y1=Math.min(H,Math.ceil(q.y+rad+1));
+    for(let y=y0;y<y1;y++) for(let x=x0;x<x1;x++){
+      const dist = Math.hypot(x+0.5-q.x, y+0.5-q.y);
+      let c;
+      if(soft < 0.01) c = Math.min(1, Math.max(0, rad - dist + 0.5));
+      else { c = dist <= inner ? 1 : dist >= rad ? 0 : (rad-dist)/(rad-inner); c = c*c*(3-2*c); }
+      const v = Math.round(c*255), i = y*W + x;
+      if(v > s.cov[i]) s.cov[i] = v;
+    }
+    bx0=Math.min(bx0,x0); by0=Math.min(by0,y0); bx1=Math.max(bx1,x1); by1=Math.max(by1,y1);
+  }
+  for(let y=by0;y<by1;y++) for(let x=bx0;x<bx1;x++){
+    const i = y*W + x, c = s.cov[i]; if(!c) continue;
+    const b = s.base[i];
+    pend.mask[i] = s.add ? b + Math.round((255-b)*c/255) : Math.round(b*(255-c)/255);
+  }
+  paintMaskPreview(bx0, by0, bx1, by1);
+}
+function maskUndo(){
+  if(!pend || !pend.hist.length) return false;
+  pend.mask = pend.hist.pop(); paintMaskPreview(0, 0, pend.W, pend.H); drawOverlay(); return true;
+}
+function maskInvert(){
+  if(!pend) return;
+  pend.hist.push(pend.mask.slice());
+  for(let i=0;i<pend.mask.length;i++) pend.mask[i] = 255 - pend.mask[i];
+  paintMaskPreview(0, 0, pend.W, pend.H); drawOverlay();
+}
+// 누끼 실행: 마스크를 원본에 적용 (테두리 다듬기 슬라이더 값 반영)
+function maskRun(){
+  if(!pend) return;
+  if(pend.W !== cv.width || pend.H !== cv.height){ endMask(); return; }
+  const mask = pend.mask;
+  endMask();
+  pushUndo();
+  keepForRestore();
+  startRefine(ctx.getImageData(0, 0, cv.width, cv.height), mask);
+  afterChange();
+}
+ov.addEventListener('pointerleave', ()=>{ mouse = null; drawOverlay(); });
+window.addEventListener('resize', ()=>{ if(!$('#editor').hidden) layoutCanvas(); });
+
+// 휠 = 확대/축소, 드래그(도구 없을 때) 또는 휠 버튼 드래그 = 이동
+const stage = $('#stage');
+stage.addEventListener('wheel', e=>{
+  if($('#editor').hidden) return;
+  e.preventDefault();
+  const step = e.deltaMode === 1 ? e.deltaY*33 : e.deltaY;
+  setZoom(zoom * Math.exp(-step*0.0015), e.clientX, e.clientY);
+}, {passive:false});
+let pan = null;
+stage.addEventListener('pointerdown', e=>{
+  if(e.target.closest('#busy')) return;
+  if(e.button === 1 || (e.button === 0 && !tool)){
+    e.preventDefault();
+    pan = { x:e.clientX, y:e.clientY, sl:stage.scrollLeft, st:stage.scrollTop };
+    stage.setPointerCapture(e.pointerId); stage.classList.add('panning');
+  }
+});
+stage.addEventListener('pointermove', e=>{
+  if(!pan) return;
+  stage.scrollLeft = pan.sl - (e.clientX - pan.x);
+  stage.scrollTop  = pan.st - (e.clientY - pan.y);
+});
+['pointerup','pointercancel'].forEach(ev=>stage.addEventListener(ev, ()=>{ pan = null; stage.classList.remove('panning'); }));
+$('#zoomIn').onclick = ()=> setZoom(zoom*1.25);
+$('#zoomOut').onclick = ()=> setZoom(zoom/1.25);
+$('#zoomFit').onclick = $('#zoomV').onclick = ()=>{ zoom = 1; layoutCanvas(); };
+$('#zoom100').onclick = ()=> setZoom(1/fitScale());
+
+/* 색 지우기 (매직 지우개) */
+function magicErase(sx, sy){
+  if(sx<0||sy<0||sx>=cv.width||sy>=cv.height) return;
+  const W=cv.width, H=cv.height, id=ctx.getImageData(0,0,W,H), d=id.data;
+  const i0=(sy*W+sx)*4, r0=d[i0], g0=d[i0+1], b0=d[i0+2], a0=d[i0+3];
+  const tol = +$('#tol').value, tol2 = tol*tol*3;
+  const match = i => { if(d[i+3]===0) return a0===0; const dr=d[i]-r0, dg=d[i+1]-g0, db=d[i+2]-b0; return dr*dr+dg*dg+db*db <= tol2; };
+  const soft = i => { // 가장자리 부드럽게: 경계 근처는 부분 투명
+    const dr=d[i]-r0, dg=d[i+1]-g0, db=d[i+2]-b0, dist=Math.sqrt((dr*dr+dg*dg+db*db)/3);
+    const edge = tol*0.6; return dist < edge ? 0 : Math.round(d[i+3] * (dist-edge)/(tol-edge+0.001));
+  };
+  if(!$('#wandCont').checked){
+    for(let i=0;i<d.length;i+=4) if(match(i)) d[i+3] = soft(i);
+  } else {
+    const seen = new Uint8Array(W*H), stack = [sy*W+sx];
+    while(stack.length){
+      const p = stack.pop(); if(seen[p]) continue; seen[p]=1;
+      const i = p*4; if(!match(i)) continue;
+      d[i+3] = soft(i);
+      const x = p % W, y = (p - x)/W;
+      if(x>0) stack.push(p-1); if(x<W-1) stack.push(p+1);
+      if(y>0) stack.push(p-W); if(y<H-1) stack.push(p+W);
+    }
+  }
+  ctx.putImageData(id,0,0);
+}
+
+/* 클릭으로 물체 선택 (Segment Anything — SlimSAM, 브라우저 안에서 실행)
+   이미지를 한 번 분석(임베딩)해 두고, 클릭할 때마다 가벼운 디코더만 다시 돌림 */
+let samLibP = null, samEmb = null, samKey = '', samPts = [], samMask = null, samMaskCv = null, samChain = Promise.resolve();
+function samQueue(fn){
+  samChain = samChain.then(fn).catch(e=>{
+    busy(false); ov.style.cursor = tool==='sam' ? 'crosshair' : ov.style.cursor;
+    alert('물체 선택 AI 오류: ' + (e && e.message || e) + '\n인터넷 연결을 확인해 주세요.');
+  });
+  return samChain;
+}
+function samLoad(){
+  if(!samLibP) samLibP = (async()=>{
+    const T = await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.0.2');
+    T.env.allowLocalModels = false;
+    const id = 'Xenova/slimsam-77-uniform';
+    const progress_callback = p => { if(p.status === 'progress') busy(true, `물체 선택 AI 내려받는 중… ${Math.round(p.progress||0)}%`, p.progress||0); };
+    const [model, processor] = await Promise.all([
+      T.SamModel.from_pretrained(id, { progress_callback }),
+      T.AutoProcessor.from_pretrained(id),
+    ]);
+    return { T, model, processor };
+  })().catch(e=>{ samLibP = null; throw e; });
+  return samLibP;
+}
+async function samEnsure(){
+  const key = cv.width + 'x' + cv.height + ':' + editVersion;
+  if(samEmb && samKey === key) return;
+  busy(true, '물체 선택 AI 준비 중… (처음 한 번은 모델을 내려받습니다)', 0);
+  try{
+    const { T, model, processor } = await samLoad();
+    busy(true, '이미지 분석 중… (몇 초 걸립니다)', 100);
+    // 투명한 부분은 흰 배경으로 채워 분석
+    const c = document.createElement('canvas'); c.width = cv.width; c.height = cv.height;
+    const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0,0,c.width,c.height); x.drawImage(cv,0,0);
+    const img = await T.RawImage.fromBlob(await new Promise(r=>c.toBlob(r,'image/png')));
+    const inputs = await processor(img);
+    samEmb = { inputs, emb: await model.get_image_embeddings(inputs) };
+    samKey = key;
+  } finally { busy(false); }
+}
+async function samDecode(){
+  if(tool !== 'sam') return;
+  if(!samPts.length){ samMask = null; drawOverlay(); return; }
+  ov.style.cursor = 'progress';
+  const { T, model, processor } = await samLoad();
+  const { inputs, emb } = samEmb;
+  const rs = inputs.reshaped_input_sizes[0];   // [h, w]
+  const pts = samPts.slice();
+  const input_points = new T.Tensor('float32', Float32Array.from(pts.flatMap(p=>[p.x/cv.width*rs[1], p.y/cv.height*rs[0]])), [1,1,pts.length,2]);
+  const input_labels = new T.Tensor('int64', BigInt64Array.from(pts.map(p=>BigInt(p.label))), [1,1,pts.length]);
+  const out = await model({ ...emb, input_points, input_labels });
+  const masks = await processor.post_process_masks(out.pred_masks, inputs.original_sizes, inputs.reshaped_input_sizes);
+  if(tool !== 'sam' || pts.length !== samPts.length) return;   // 그 사이 상태가 바뀜
+  const m = masks[0], H = m.dims[2], W = m.dims[3], sc = out.iou_scores.data;
+  let best = 0; for(let i=1;i<sc.length;i++) if(sc[i] > sc[best]) best = i;
+  samMask = m.data.subarray(best*H*W, (best+1)*H*W);
+  // 미리보기: 선택 밖을 어둡게 + 경계선 (어떤 색 사진에서도 잘 보이게)
+  samMaskCv = document.createElement('canvas'); samMaskCv.width = W; samMaskCv.height = H;
+  const mx = samMaskCv.getContext('2d'), id = mx.createImageData(W, H), d = id.data;
+  for(let y=0;y<H;y++) for(let x=0;x<W;x++){
+    const i = y*W + x, on = samMask[i];
+    const edge = on && (x===0 || y===0 || x===W-1 || y===H-1 || !samMask[i-1] || !samMask[i+1] || !samMask[i-W] || !samMask[i+W]);
+    if(edge){ d[i*4]=255; d[i*4+1]=230; d[i*4+2]=0; d[i*4+3]=255; }
+    else if(!on){ d[i*4+3]=150; }
+  }
+  mx.putImageData(id, 0, 0);
+  ov.style.cursor = 'crosshair';
+  drawOverlay();
+}
+// 누끼 전 픽셀을 복원 브러시용으로 보관 (이미 지운 곳은 예전 원본 유지)
+function keepForRestore(){
+  const c = cloneCanvas(restoreCv); c.getContext('2d').drawImage(cv, 0, 0); restoreCv = c;
+}
+function samApply(keep){
+  if(!samMask){ alert('먼저 남길 물체를 클릭하세요.'); return; }
+  const W = cv.width, H = cv.height;
+  const mask = new Uint8Array(W*H);
+  for(let i=0;i<W*H;i++) mask[i] = (samMask[i] ? 1 : 0) ^ (keep ? 0 : 1) ? 255 : 0;
+  samPts = []; samMask = null;
+  startMask(mask);   // 바로 적용하지 않고 마스크 확인 모드로
+}
+
+/* 테두리 다듬기: 누끼 마스크를 '안쪽으로 줄이기'(침식) + '부드럽게'(가우시안 흐림) 한 뒤 원본에 적용.
+   누끼 직후에는 마지막 누끼 상태(refine)를 기억해 두고, 슬라이더를 움직이면 같은 원본에서 다시 계산 */
+let refine = null;   // { base: ImageData(누끼 전), mask: Uint8Array(0~255), W, H }
+function startRefine(baseImageData, mask){
+  refine = { base: baseImageData, mask, W: cv.width, H: cv.height };
+  renderRefine();
+}
+function erode(a, W, H, square){
+  const o = new Uint8Array(a.length);
+  for(let y=0;y<H;y++){
+    const r = y*W;
+    for(let x=0;x<W;x++){
+      const i = r + x; let v = a[i];
+      if(x>0 && a[i-1]<v) v=a[i-1];
+      if(x<W-1 && a[i+1]<v) v=a[i+1];
+      if(y>0 && a[i-W]<v) v=a[i-W];
+      if(y<H-1 && a[i+W]<v) v=a[i+W];
+      if(square){
+        if(x>0 && y>0 && a[i-W-1]<v) v=a[i-W-1];
+        if(x<W-1 && y>0 && a[i-W+1]<v) v=a[i-W+1];
+        if(x>0 && y<H-1 && a[i+W-1]<v) v=a[i+W-1];
+        if(x<W-1 && y<H-1 && a[i+W+1]<v) v=a[i+W+1];
+      }
+      o[i] = v;
+    }
+  }
+  return o;
+}
+function renderRefine(){
+  if(!refine || refine.W !== cv.width || refine.H !== cv.height){ refine = null; return; }
+  const { base, W, H } = refine;
+  const shrink = +$('#edgeShrink').value, feather = +$('#edgeFeather').value;
+  let m = refine.mask;
+  for(let k=0;k<shrink;k++) m = erode(m, W, H, k % 2 === 1);   // 십자/사각 번갈아 → 둥근 침식
+  if(feather > 0){
+    const a = document.createElement('canvas'); a.width = W; a.height = H;
+    const ax = a.getContext('2d'), aid = ax.createImageData(W, H);
+    for(let i=0;i<W*H;i++) aid.data[i*4+3] = m[i];
+    ax.putImageData(aid, 0, 0);
+    const b = document.createElement('canvas'); b.width = W; b.height = H;
+    const bx = b.getContext('2d', {willReadFrequently:true});
+    bx.filter = `blur(${feather}px)`; bx.drawImage(a, 0, 0);
+    const bd = bx.getImageData(0, 0, W, H).data;
+    m = new Uint8Array(W*H); for(let i=0;i<W*H;i++) m[i] = bd[i*4+3];
+  }
+  const out = new ImageData(new Uint8ClampedArray(base.data), W, H), d = out.data;
+  for(let i=0;i<W*H;i++) d[i*4+3] = Math.round(base.data[i*4+3] * m[i] / 255);
+  ctx.putImageData(out, 0, 0);
+  drawOverlay();
+}
+// 슬라이더를 움직였는데 기억된 누끼가 없으면: 지금 이미지의 투명도를 마스크로 삼아 시작
+function onEdgeSlider(){
+  $('#edgeShrinkV').textContent = $('#edgeShrink').value + 'px';
+  $('#edgeFeatherV').textContent = $('#edgeFeather').value + 'px';
+  if($('#editor').hidden) return;
+  const hint = $('#edgeHint');
+  if(!hint.dataset.orig) hint.dataset.orig = hint.textContent;
+  hint.textContent = hint.dataset.orig;
+  if(!refine){
+    const W = cv.width, H = cv.height, cur = ctx.getImageData(0, 0, W, H).data;
+    let hasCut = false; const mask = new Uint8Array(W*H);
+    for(let i=0;i<W*H;i++){ mask[i] = cur[i*4+3]; if(mask[i] < 250) hasCut = true; }
+    if(!hasCut){ $('#edgeHint').textContent = '먼저 누끼를 따 주세요. 투명한 부분이 없어서 다듬을 테두리가 없습니다.'; return; }
+    pushUndo();
+    // 원본 픽셀(복원용)을 바탕으로, 현재 투명도를 마스크로
+    const base = restoreCv.getContext('2d').getImageData(0, 0, W, H);
+    refine = { base, mask, W, H };
+  }
+  renderRefine();
+}
+
+/* AI 누끼 */
+let bgLibPromise = null;
+function loadBgLib(){
+  if(!bgLibPromise) bgLibPromise = import('https://esm.sh/@imgly/background-removal@1.5.5').catch(e=>{ bgLibPromise=null; throw e; });
+  return bgLibPromise;
+}
+async function aiRemoveBg(){
+  bakeFilters(); applyTilt();
+  busy(true, 'AI 모델 불러오는 중… (첫 실행은 시간이 걸립니다)', 0);
+  try{
+    // 영역: 자르기 선택이 있으면 그 안만 (밖은 배경으로 처리)
+    let R = { x:0, y:0, w:cv.width, h:cv.height }, limited = false;
+    if(tool === 'crop' && cropRect){
+      const r = normRect(cropRect);
+      if(r.w > 8 && r.h > 8){ R = { x:Math.round(r.x), y:Math.round(r.y), w:Math.round(r.w), h:Math.round(r.h) }; limited = true; }
+    }
+    // AI에 넣을 입력 (대비 강화 옵션은 AI 입력에만 적용, 결과 색은 원본 그대로)
+    const inp = document.createElement('canvas'); inp.width = R.w; inp.height = R.h;
+    const ix = inp.getContext('2d');
+    if($('#aiBoost').checked) ix.filter = 'contrast(175%) saturate(180%)';
+    ix.drawImage(cv, R.x, R.y, R.w, R.h, 0, 0, R.w, R.h);
+    const input = await new Promise(r=>inp.toBlob(r,'image/png'));
+
+    const lib = await loadBgLib();
+    const out = await lib.removeBackground(input, {
+      model: $('#aiModel').value,
+      progress: (key, cur, total) => {
+        const pct = total ? Math.round(cur/total*100) : 0;
+        busy(true, key.startsWith('fetch') ? `AI 모델 내려받는 중… ${pct}%` : '배경 제거 중…', pct);
+      },
+      output: { format: 'image/png' }
+    });
+    busy(true, '마무리 중…', 100);
+
+    // AI 결과에서 '투명도(마스크)'만 꺼내 원본 픽셀에 적용
+    const bmp = await createImageBitmap(out);
+    const mc = document.createElement('canvas'); mc.width = R.w; mc.height = R.h;
+    const mx = mc.getContext('2d', {willReadFrequently:true}); mx.drawImage(bmp, 0, 0, R.w, R.h);
+    const ai = mx.getImageData(0, 0, R.w, R.h).data;
+    const W = cv.width, H = cv.height, mask = new Uint8Array(W*H);
+    for(let y=R.y; y<R.y+R.h; y++) for(let x=R.x; x<R.x+R.w; x++)
+      mask[y*W + x] = ai[((y-R.y)*R.w + (x-R.x))*4 + 3];
+    busy(false);
+    startMask(mask);   // 바로 적용하지 않고 마스크 확인 모드로 (영역 선택도 해제됨)
+  }catch(e){
+    busy(false);
+    alert('AI 누끼에 실패했습니다: ' + (e && e.message || e) + '\n인터넷 연결을 확인하거나, [색 지우기]를 이용해 보세요.');
+  }
+}
+
+/* 자르기 / 회전 / 반전 / 크기 */
+function cropTo(x,y,w,h){
+  transformBoth(src=>{ const c=document.createElement('canvas'); c.width=w; c.height=h; c.getContext('2d').drawImage(src,-x,-y); return c; });
+}
+function rotate(dir){
+  transformBoth(src=>{ const c=document.createElement('canvas'); c.width=src.height; c.height=src.width; const x=c.getContext('2d');
+    x.translate(c.width/2,c.height/2); x.rotate(dir*Math.PI/2); x.drawImage(src,-src.width/2,-src.height/2); return c; });
+}
+function flip(h){
+  transformBoth(src=>{ const c=document.createElement('canvas'); c.width=src.width; c.height=src.height; const x=c.getContext('2d');
+    if(h){ x.translate(c.width,0); x.scale(-1,1); } else { x.translate(0,c.height); x.scale(1,-1); } x.drawImage(src,0,0); return c; });
+}
+function resizeTo(w,h){
+  transformBoth(src=>{
+    // 큰 축소는 단계적으로 줄여 품질 유지
+    let cur = src;
+    while(cur.width/2 >= w && cur.height/2 >= h){ const t=document.createElement('canvas'); t.width=Math.round(cur.width/2); t.height=Math.round(cur.height/2); const tx=t.getContext('2d'); tx.imageSmoothingQuality='high'; tx.drawImage(cur,0,0,t.width,t.height); cur=t; }
+    const c=document.createElement('canvas'); c.width=w; c.height=h; const x=c.getContext('2d'); x.imageSmoothingQuality='high'; x.drawImage(cur,0,0,w,h); return c; });
+}
+/* 기울기 (자유 각도 회전) — 미리보기는 CSS 회전 + 수평 격자, 적용 시 픽셀 반영 */
+function tiltDeg(){ return +$('#tilt').value || 0; }
+function setTiltUI(v){
+  v = Math.max(-45, Math.min(45, Math.round((+v||0)*10)/10));
+  $('#tilt').value = v; $('#tiltN').value = v;
+  cv.style.transform = v ? `rotate(${v}deg)` : '';
+  drawOverlay();
+}
+// 회전 후 빈 모서리 없이 들어가는 가장 큰 직사각형
+function innerRect(w, h, rad){
+  const s = Math.abs(Math.sin(rad)), c = Math.abs(Math.cos(rad));
+  const wide = w >= h, L = wide ? w : h, S = wide ? h : w;
+  if(S <= 2*s*c*L || Math.abs(s-c) < 1e-10){
+    const x = S/2; return wide ? {w:x/s, h:x/c} : {w:x/c, h:x/s};
+  }
+  const c2 = c*c - s*s;
+  return { w:(w*c - h*s)/c2, h:(h*c - w*s)/c2 };
+}
+function applyTilt(){
+  const deg = tiltDeg(); if(!deg) return;
+  const crop = $('#tiltCrop').checked;
+  setTiltUI(0);   // 먼저 0으로 (pushUndo 재진입 방지)
+  const rad = deg * Math.PI / 180;
+  transformBoth(src=>{
+    const w = src.width, h = src.height, s = Math.abs(Math.sin(rad)), co = Math.abs(Math.cos(rad));
+    let W, H;
+    if(crop){ const r = innerRect(w, h, rad); W = Math.max(1, Math.floor(r.w)); H = Math.max(1, Math.floor(r.h)); }
+    else { W = Math.ceil(w*co + h*s); H = Math.ceil(w*s + h*co); }
+    const c = document.createElement('canvas'); c.width = W; c.height = H;
+    const x = c.getContext('2d'); x.imageSmoothingQuality = 'high';
+    x.translate(W/2, H/2); x.rotate(rad); x.drawImage(src, -w/2, -h/2);
+    return c;
+  });
+}
+function drawTiltGuide(px){
+  const deg = tiltDeg(); if(!deg) return;
+  const W = cv.width, H = cv.height;
+  // 수평·수직 격자 (기준선)
+  octx.lineWidth = px;
+  for(let i=1;i<8;i++){
+    [[W*i/8,0,W*i/8,H],[0,H*i/8,W,H*i/8]].forEach(([a,b,c,d])=>{
+      octx.strokeStyle='rgba(0,0,0,.35)'; octx.beginPath(); octx.moveTo(a,b); octx.lineTo(c,d); octx.stroke();
+      octx.strokeStyle='rgba(255,255,255,.6)'; octx.beginPath(); octx.moveTo(a+px,b+px); octx.lineTo(c+px,d+px); octx.stroke();
+    });
+  }
+  // 잘라낼 영역 표시
+  if($('#tiltCrop').checked){
+    const r = innerRect(W, H, deg*Math.PI/180), x = (W-r.w)/2, y = (H-r.h)/2;
+    octx.fillStyle='rgba(0,0,0,.45)';
+    octx.beginPath(); octx.rect(-W,-H,W*3,H*3); octx.rect(x,y+r.h,r.w,-r.h); octx.fill('evenodd');
+    octx.strokeStyle='#fff'; octx.lineWidth=1.5*px; octx.strokeRect(x,y,r.w,r.h);
+  }
+}
+
+function trimTransparent(){
+  const W=cv.width,H=cv.height,d=ctx.getImageData(0,0,W,H).data;
+  let x0=W,y0=H,x1=-1,y1=-1;
+  for(let y=0;y<H;y++) for(let x=0;x<W;x++) if(d[(y*W+x)*4+3]>8){ if(x<x0)x0=x; if(x>x1)x1=x; if(y<y0)y0=y; if(y>y1)y1=y; }
+  if(x1<0){ alert('이미지가 모두 투명합니다.'); return; }
+  if(x0===0&&y0===0&&x1===W-1&&y1===H-1){ alert('잘라낼 투명 여백이 없습니다.'); return; }
+  cropTo(x0,y0,x1-x0+1,y1-y0+1);
+}
+
+/* 색 보정 (미리보기는 CSS 필터, 적용 시 픽셀에 반영) */
+const F = ['fBright','fContrast','fSat','fBlur','fGray'];
+function filterStr(){
+  const v = id => +$('#'+id).value;
+  const parts = [];
+  if(v('fBright')!==100) parts.push(`brightness(${v('fBright')}%)`);
+  if(v('fContrast')!==100) parts.push(`contrast(${v('fContrast')}%)`);
+  if(v('fSat')!==100) parts.push(`saturate(${v('fSat')}%)`);
+  if(v('fBlur')) parts.push(`blur(${v('fBlur')}px)`);
+  if(v('fGray')) parts.push(`grayscale(${v('fGray')}%)`);
+  return parts.join(' ');
+}
+function previewFilters(){
+  F.forEach(id=>{ const el=$('#'+id); el.nextElementSibling.textContent = el.value; });
+  const f = filterStr();
+  // blur는 표시 배율에 맞춰 미리보기
+  const r = cv.getBoundingClientRect(); const k = r.width ? r.width/cv.width : 1;
+  cv.style.filter = f.replace(/blur\(([\d.]+)px\)/, (m,b)=>`blur(${b*k}px)`);
+}
+function resetFilterUI(){ $('#fBright').value=100; $('#fContrast').value=100; $('#fSat').value=100; $('#fBlur').value=0; $('#fGray').value=0; previewFilters(); }
+function bakeFilters(){
+  const f = filterStr(); if(!f) return;
+  const c = document.createElement('canvas'); c.width=cv.width; c.height=cv.height;
+  const x = c.getContext('2d'); x.filter = f; x.drawImage(cv,0,0);
+  undoStack.push(snapshot()); if(undoStack.length>30) undoStack.shift(); redoStack=[]; updUndo();
+  resetFilterUI(); setCanvas(c);
+}
+
+/* 내보내기 */
+function exportBlob(fmt){
+  if(pend && confirm('확인 중인 마스크가 아직 실행되지 않았습니다.\n[확인] 누끼를 실행한 뒤 저장 · [취소] 마스크 없이 저장')) maskRun();
+  bakeFilters(); applyTilt();
+  fmt = fmt || $('#fmt').value;
+  let src = cv;
+  if(fmt==='jpeg'){ src = document.createElement('canvas'); src.width=cv.width; src.height=cv.height; const x=src.getContext('2d'); x.fillStyle='#fff'; x.fillRect(0,0,src.width,src.height); x.drawImage(cv,0,0); }
+  return new Promise(r=>src.toBlob(r, 'image/'+fmt, 0.92));
+}
+async function saveEdited(){
+  const b = await exportBlob();
+  const fmt = $('#fmt').value, ext = fmt==='jpeg'?'jpg':fmt;
+  const base = (curItem ? curItem.name : 'image').replace(/\.[a-z0-9]{2,5}$/i,'');
+  downloadBlob(b, `${base}_편집.${ext}`);
+}
+// 다른 이름으로 저장: 파일 이름·폴더·형식을 직접 고름 (확장자로 형식 결정)
+const SAVE_TYPES = {
+  png:  { description:'PNG 이미지 (투명 유지)', accept:{'image/png':['.png']} },
+  jpeg: { description:'JPG 이미지', accept:{'image/jpeg':['.jpg','.jpeg']} },
+  webp: { description:'WebP 이미지', accept:{'image/webp':['.webp']} },
+};
+function fmtFromName(name){
+  const e = (name.match(/\.([a-z0-9]+)$/i)||[])[1];
+  if(!e) return null;
+  return ({png:'png', jpg:'jpeg', jpeg:'jpeg', webp:'webp'})[e.toLowerCase()] || null;
+}
+async function saveEditedAs(){
+  const cur = $('#fmt').value, ext = cur==='jpeg'?'jpg':cur;
+  const base = (curItem ? curItem.name : 'image').replace(/\.[a-z0-9]{2,5}$/i,'');
+  const suggested = `${base}_편집.${ext}`;
+  if(window.showSaveFilePicker){
+    let handle;
+    try{
+      handle = await window.showSaveFilePicker({
+        suggestedName: suggested,
+        types: [SAVE_TYPES[cur], ...Object.keys(SAVE_TYPES).filter(k=>k!==cur).map(k=>SAVE_TYPES[k])],
+      });
+    }catch(e){
+      if(e.name === 'AbortError') return;   // 사용자가 취소
+      handle = null;                        // 지원 안 됨 → 아래 방식으로
+    }
+    if(handle){
+      try{
+        const fmt = fmtFromName(handle.name) || cur;
+        const blob = await exportBlob(fmt);
+        const w = await handle.createWritable(); await w.write(blob); await w.close();
+        flashBtn('#eSaveAs', '저장됨 ✓', '다른 이름으로 저장');
+      }catch(e){ alert('저장 실패: ' + e.message); }
+      return;
+    }
+  }
+  // 대체 방식: 이름만 입력받아 다운로드 폴더에 저장
+  let name = prompt('저장할 파일 이름 (확장자 .png / .jpg / .webp 로 형식 선택)', suggested);
+  if(!name) return;
+  name = name.trim().replace(/[\\/:*?"<>|]/g,'_');
+  let fmt = fmtFromName(name);
+  if(!fmt){ fmt = cur; name += '.' + ext; }
+  downloadBlob(await exportBlob(fmt), name);
+}
+function flashBtn(sel, msg, orig){ const b=$(sel); b.textContent=msg; setTimeout(()=>b.textContent=orig, 1500); }
+
+async function copyEdited(){
+  try{
+    bakeFilters(); applyTilt();
+    const b = await new Promise(r=>cv.toBlob(r,'image/png'));
+    await navigator.clipboard.write([new ClipboardItem({'image/png': b})]);
+    $('#eCopy').textContent = '복사됨 ✓'; setTimeout(()=>$('#eCopy').textContent='클립보드 복사', 1500);
+  }catch(e){ alert('클립보드 복사 실패: '+e.message); }
+}
+
+/* ================= 이벤트 연결 ================= */
+$('#go').onclick = extractFromUrl;
+$('#url').addEventListener('keydown', e=>{ if(e.key==='Enter') extractFromUrl(); });
+$('#togglePaste').onclick = ()=>{ $('#pastePanel').hidden = !$('#pastePanel').hidden; if(!$('#pastePanel').hidden) $('#pasteBox').focus(); };
+$('#toggleHelp').onclick = ()=>{ $('#helpPanel').hidden = !$('#helpPanel').hidden; };
+$('#parsePaste').onclick = ()=>{
+  const t = $('#pasteBox').value; if(!t.trim()) return;
+  const base = $('#url').value.trim() || undefined;
+  const urls = extractUrls(t, base);
+  const n = addItems(urls);
+  setStatus(`${urls.length}개 주소 발견 · ${n}개 추가됨`, !urls.length);
+};
+$('#minSize').oninput = ()=>{ store.set('minSize', $('#minSize').value); items.forEach(updateCard); };
+$('#hideBroken').onchange = ()=> items.forEach(updateCard);
+$('#selAll').onclick = ()=>{ items.forEach(i=>{ if(visible(i)) i.sel = true; updateCard(i); }); };
+$('#selNone').onclick = ()=>{ items.forEach(i=>{ i.sel = false; updateCard(i); }); };
+$('#dlSel').onclick = downloadSelected;
+$('#clearAll').onclick = ()=>{ items.length = 0; $('#grid').innerHTML=''; render(); setStatus(''); };
+$('#customProxy').oninput = ()=> store.set('customProxy', $('#customProxy').value);
+
+const drop = $('#drop');
+['dragenter','dragover'].forEach(ev=>document.addEventListener(ev, e=>{ e.preventDefault(); drop.classList.add('over'); }));
+['dragleave','drop'].forEach(ev=>document.addEventListener(ev, e=>{ e.preventDefault(); if(ev==='drop' || e.target===document.documentElement) drop.classList.remove('over'); }));
+document.addEventListener('drop', e=>{
+  drop.classList.remove('over');
+  if(e.dataTransfer.files.length) return addFiles(e.dataTransfer.files);
+  const html = e.dataTransfer.getData('text/html') || e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain');
+  if(html){ const n = addItems(extractUrls(html, $('#url').value.trim()||undefined)); setStatus(n+'개 이미지 추가됨'); }
+});
+$('#fileIn').onchange = e => { addFiles(e.target.files); e.target.value=''; };
+document.addEventListener('paste', e=>{
+  if(e.target.closest && e.target.closest('input,textarea')) return;
+  const files = [...(e.clipboardData.items||[])].filter(i=>i.kind==='file').map(i=>i.getAsFile()).filter(Boolean);
+  if(files.length){ e.preventDefault(); addFiles(files); return; }
+  const t = e.clipboardData.getData('text/html') || e.clipboardData.getData('text/plain');
+  if(t){ const urls = extractUrls(t, $('#url').value.trim()||undefined); if(urls.length){ addItems(urls); setStatus(urls.length+'개 이미지 주소 추가됨'); } }
+});
+
+// 에디터
+$('#eClose').onclick = closeEditor;
+$('#eUndo').onclick = undo; $('#eRedo').onclick = redo;
+$('#eReset').onclick = ()=>{ pushUndo(); restoreCv = cloneCanvas(originalCv); setCanvas(originalCv); };
+$('#bgView').onchange = e => { $('#stage').className = e.target.value; store.set('bgView', e.target.value); };
+$('#eSave').onclick = saveEdited; $('#eCopy').onclick = copyEdited;
+$('#eSaveAs').onclick = saveEditedAs;
+$('#fmt').onchange = e => store.set('fmt', e.target.value);
+document.querySelectorAll('#side [data-tool]').forEach(b=> b.onclick = ()=> setTool(b.dataset.tool));
+$('#aiBg').onclick = aiRemoveBg;
+$('#samKeep').onclick = ()=> samApply(true);
+$('#samCut').onclick = ()=> samApply(false);
+$('#samClear').onclick = ()=>{ samPts = []; samMask = null; drawOverlay(); };
+$('#maskRun').onclick = maskRun;
+$('#maskCancel').onclick = endMask;
+$('#maskInvert').onclick = maskInvert;
+$('#edgeShrink').oninput = onEdgeSlider;
+$('#edgeFeather').oninput = onEdgeSlider;
+$('#tol').oninput = e => $('#tolV').textContent = e.target.value;
+$('#brush').oninput = e => { $('#brushV').textContent = e.target.value; drawOverlay(); };
+$('#soft').oninput = e => { $('#softV').textContent = e.target.value; };
+$('#cropApply').onclick = ()=>{
+  if(!cropRect) return alert('이미지 위를 드래그해 자를 영역을 선택하세요.');
+  const r = normRect(cropRect); if(r.w<2||r.h<2) return;
+  const {x,y,w,h} = {x:Math.round(r.x),y:Math.round(r.y),w:Math.round(r.w),h:Math.round(r.h)};
+  setTool(null); cropTo(x,y,w,h);
+};
+$('#cropCancel').onclick = ()=> setTool(null);
+$('#trimBtn').onclick = trimTransparent;
+$('#rotL').onclick = ()=>rotate(-1); $('#rotR').onclick = ()=>rotate(1);
+$('#flipH').onclick = ()=>flip(true); $('#flipV').onclick = ()=>flip(false);
+$('#tilt').oninput = e => setTiltUI(e.target.value);
+$('#tiltN').oninput = e => setTiltUI(e.target.value);
+$('#tiltCrop').onchange = drawOverlay;
+$('#tiltApply').onclick = applyTilt;
+$('#tiltReset').onclick = ()=> setTiltUI(0);
+$('#rw').oninput = ()=>{ if($('#keepRatio').checked && cv.width) $('#rh').value = Math.max(1,Math.round(+$('#rw').value * cv.height / cv.width)); };
+$('#rh').oninput = ()=>{ if($('#keepRatio').checked && cv.height) $('#rw').value = Math.max(1,Math.round(+$('#rh').value * cv.width / cv.height)); };
+$('#resizeApply').onclick = ()=>{ const w=Math.round(+$('#rw').value), h=Math.round(+$('#rh').value); if(w>0&&h>0&&w<=16000&&h<=16000&&(w!==cv.width||h!==cv.height)) resizeTo(w,h); };
+F.forEach(id=> $('#'+id).oninput = previewFilters);
+$('#fApply').onclick = bakeFilters;
+$('#fReset').onclick = resetFilterUI;
+document.addEventListener('keydown', e=>{
+  if($('#editor').hidden || e.target.closest('input,textarea,select')) return;
+  if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='z'){ e.preventDefault(); e.shiftKey ? redo() : undo(); }
+  else if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='y'){ e.preventDefault(); redo(); }
+  else if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='s'){ e.preventDefault(); e.shiftKey ? saveEditedAs() : saveEdited(); }
+  else if(e.key==='Escape'){ tool ? setTool(null) : pend ? endMask() : closeEditor(); }
+  else if(e.key==='Enter' && pend && tool!=='crop'){ e.preventDefault(); maskRun(); }
+  else if(e.key==='Enter' && tool==='crop'){ $('#cropApply').click(); }
+});
+
+// 북마클릿
+(function(){
+  const code = `(()=>{const s=new Set();const A=u=>{try{if(u)s.add(new URL(u,location.href).href)}catch(e){}};document.querySelectorAll('img').forEach(i=>{A(i.currentSrc||i.src);if(i.srcset)i.srcset.split(',').forEach(p=>A(p.trim().split(/\\s+/)[0]))});document.querySelectorAll('source[srcset]').forEach(e=>e.srcset.split(',').forEach(p=>A(p.trim().split(/\\s+/)[0])));document.querySelectorAll('*').forEach(e=>{const b=getComputedStyle(e).backgroundImage;if(b&&b!=='none')b.replace(/url\\(["']?([^"')]+)["']?\\)/g,(m,u)=>A(u))});document.querySelectorAll('svg').forEach(v=>{if(v.getBoundingClientRect().width>40)s.add('data:image/svg+xml;charset=utf-8,'+encodeURIComponent(new XMLSerializer().serializeToString(v)))});const t=[...s].join('\\n');const ok=()=>alert(s.size+'개 이미지 주소가 복사되었습니다.\\n편집기의 [소스/주소 붙여넣기] 칸에 붙여넣으세요.');navigator.clipboard.writeText(t).then(ok,()=>prompt('아래 내용을 복사(Ctrl+C)하세요',t))})()`;
+  const a = $('#bookmarklet'); a.href = 'javascript:' + encodeURIComponent(code);
+  a.onclick = e => { e.preventDefault(); alert('이 버튼을 브라우저 북마크바로 끌어다 놓은 뒤, 이미지를 가져올 페이지에서 북마크를 클릭하세요.'); };
+})();
+
+// 저장된 설정 복원
+(function(){
+  if(!LOCAL) $('#fileWarn').hidden = false;
+  const u = store.get('lastUrl'); if(u) $('#url').value = u;
+  const m = store.get('minSize'); if(m) $('#minSize').value = m;
+  const p = store.get('customProxy'); if(p) $('#customProxy').value = p;
+  const b = store.get('bgView'); if(b){ $('#bgView').value = b; $('#stage').className = b; }
+  const f = store.get('fmt'); if(f) $('#fmt').value = f;
+  const am = store.get('aiModel'); if(am) $('#aiModel').value = am;
+  $('#aiModel').onchange = e => store.set('aiModel', e.target.value);
+})();
+</script>
+</body>
+</html>
