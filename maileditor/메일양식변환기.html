@@ -1,0 +1,2185 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>메일 양식 변환기</title>
+<style>
+:root{
+  --bg:#f4f5f7; --panel:#ffffff; --line:#dfe2e7; --line2:#eceef1;
+  --text:#1d2330; --muted:#677084; --accent:#2f6feb; --accent-soft:#e8f0ff;
+  --warn:#b25e00; --warn-soft:#fff4e0; --danger:#c62f2f; --ok:#1d8a4a; --ok-soft:#e6f6ec;
+  --mark:#ffe28a; --radius:8px;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--text);font:14px/1.45 "Segoe UI","맑은 고딕","Malgun Gothic",system-ui,sans-serif}
+button,select,input,textarea{font:inherit;color:inherit}
+button{background:#fff;border:1px solid var(--line);border-radius:6px;padding:5px 10px;cursor:pointer;white-space:nowrap}
+button:hover:not(:disabled){border-color:#b9c0cc;background:#fafbfc}
+button:disabled{opacity:.45;cursor:default}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+button.primary:hover:not(:disabled){background:#2560d4}
+button.accent{background:var(--accent-soft);border-color:#bcd0fb;color:#1c4fb8;font-weight:600}
+button.danger{color:var(--danger)}
+button.ghost{border-color:transparent;background:transparent}
+button.icon{padding:2px 7px;line-height:1.2}
+select,input[type=text],input[type=url],input:not([type]),input[type=number],textarea{border:1px solid var(--line);border-radius:6px;padding:5px 8px;background:#fff;min-width:0}
+textarea{resize:vertical}
+input:focus,select:focus,textarea:focus{outline:2px solid #bcd0fb;border-color:var(--accent)}
+.hint{color:var(--muted);font-size:12.5px;margin:4px 0 0}
+h4{margin:18px 0 8px;font-size:13px;color:var(--muted);font-weight:600;letter-spacing:.02em}
+
+/* top bar */
+.topbar{display:flex;align-items:center;gap:8px;padding:8px 14px;background:var(--panel);border-bottom:1px solid var(--line);flex-wrap:wrap}
+.brand{font-weight:700;font-size:15px;margin-right:6px}
+.topbar select{min-width:200px;max-width:320px}
+.topbar .sep{width:1px;height:22px;background:var(--line);margin:0 2px}
+#dirtyBadge{color:var(--warn);font-size:12.5px;font-weight:600}
+
+/* layout */
+.layout{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(380px,1fr);gap:12px;padding:12px;height:calc(100vh - 54px)}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);display:flex;flex-direction:column;min-height:0;overflow:hidden}
+.pane-head{display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid var(--line2)}
+.spacer{flex:1}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:7px;overflow:hidden}
+.seg button{border:0;border-radius:0;padding:5px 12px}
+.seg button.on{background:var(--text);color:#fff}
+.toolbar{display:flex;flex-wrap:wrap;gap:6px;padding:7px 10px;border-bottom:1px solid var(--line2);align-items:center;background:#fbfbfc}
+.toolbar .grp{display:flex;gap:3px;align-items:center;padding-right:6px;border-right:1px solid var(--line2)}
+.toolbar .grp:last-child{border-right:0}
+.toolbar button{padding:4px 8px}
+.colorbtn{position:relative;display:inline-flex;align-items:center;gap:3px;border:1px solid var(--line);border-radius:6px;padding:2px 6px;background:#fff;cursor:pointer;font-weight:700}
+.colorbtn input{width:20px;height:20px;border:0;padding:0;background:none;cursor:pointer}
+.alpha{display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--muted);white-space:nowrap}
+.alpha input[type=range]{width:70px;accent-color:var(--accent)}
+.alpha span{min-width:30px;text-align:right}
+#warnings:empty{display:none}
+#warnings{padding:8px 12px;background:var(--warn-soft);color:var(--warn);font-size:13px;border-bottom:1px solid #f3dcb5}
+.frame-wrap{flex:1;min-height:0;position:relative;background:#e9ebef;padding:10px}
+.frame-wrap iframe{width:100%;height:100%;border:1px solid var(--line);border-radius:6px;background:#fff;display:block}
+#pvMeta{padding:6px 12px;font-size:12.5px;color:var(--muted);border-bottom:1px solid var(--line2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#pvMeta b{color:var(--text);font-weight:600}
+#pvWarn{color:var(--warn);font-size:12.5px}
+#pvRow{max-width:260px}
+
+/* import panel */
+.import-panel{padding:14px;border-bottom:1px solid var(--line2);background:#fbfcff}
+.paste-zone{min-height:110px;border:2px dashed #b9c8e8;border-radius:8px;display:flex;align-items:center;justify-content:center;text-align:center;color:var(--muted);padding:16px;outline:none;cursor:text;background:#fff}
+.paste-zone:empty::before{content:attr(data-ph)}
+.paste-zone:focus{border-color:var(--accent);background:var(--accent-soft)}
+.paste-zone.drag{border-color:var(--accent);background:var(--accent-soft)}
+.import-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+
+/* right panel */
+.tabs{display:flex;border-bottom:1px solid var(--line)}
+.tabs button{flex:1;border:0;border-radius:0;padding:10px 6px;background:transparent;border-bottom:2px solid transparent;font-weight:600;color:var(--muted)}
+.tabs button.on{color:var(--text);border-bottom-color:var(--accent)}
+.tabs .badge{display:inline-block;min-width:18px;padding:0 5px;border-radius:9px;background:var(--line2);font-size:11.5px;color:var(--muted);margin-left:3px}
+.tab{flex:1;overflow:auto;padding:12px 14px}
+.empty{color:var(--muted);text-align:center;padding:26px 10px;line-height:1.7}
+
+/* variable cards */
+.var{border:1px solid var(--line);border-radius:8px;padding:9px 10px;margin-bottom:9px;background:#fff}
+.var.flash{box-shadow:0 0 0 3px #ffd36b}
+.var-head{display:flex;align-items:center;gap:6px}
+.var-name{flex:1;font-weight:600;border-color:transparent!important;padding:3px 6px!important}
+.var-name:hover{border-color:var(--line)!important}
+.kind{font-size:11px;padding:1px 7px;border-radius:10px;background:var(--mark);color:#6b5000;font-weight:600}
+.kind.link{background:#dbe7ff;color:#1c4fb8}
+.count{font-size:12px;color:var(--muted)}
+.count.warn{color:var(--danger)}
+.vrow{display:flex;gap:6px;align-items:center;margin-top:7px;flex-wrap:wrap}
+.vrow>label:first-child{width:38px;color:var(--muted);font-size:12.5px;flex:none}
+.vrow select,.vrow input{flex:1 1 140px}
+.vrow input[type=checkbox],.chk input{flex:none}
+.vrow textarea{flex:1 1 200px;font-family:Consolas,"D2Coding",monospace;font-size:13px;min-height:44px}
+.fxmsg{margin:5px 0 0 44px;font-size:12.5px}
+.fxmsg .ok{color:var(--ok)} .fxmsg .bad{color:var(--danger)} .fxmsg .muted{color:var(--muted)}
+.fxhelp{font-size:12.5px;line-height:1.6;color:var(--text);background:#f8f9fb;border-radius:6px;padding:6px 10px;margin-top:6px}
+.fxhelp p{margin:3px 0}
+.fxhelp code{background:#eceff4;padding:0 4px;border-radius:3px;font-family:Consolas,monospace}
+.chk{display:inline-flex;align-items:center;gap:5px;font-size:13px;cursor:pointer}
+details{margin-top:7px;border-top:1px dashed var(--line2);padding-top:6px}
+summary{cursor:pointer;font-size:12.5px;color:var(--muted);user-select:none}
+summary b{color:var(--accent);font-weight:600}
+.maptbl{width:100%;border-collapse:collapse;margin-top:6px}
+.maptbl td{padding:2px}
+.maptbl input{width:100%}
+.cur{margin-top:7px;font-size:12.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cur b{color:var(--text);font-weight:600}
+.cur .empty-val{color:var(--warn)}
+.stylegrid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:6px}
+.stylegrid label{font-size:12px;color:var(--muted);display:flex;flex-direction:column;gap:2px}
+
+/* data */
+.row-btns{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+#dataPaste{width:100%;height:64px;margin-top:8px}
+#dataInfo{margin:8px 0;font-size:13px;color:var(--muted)}
+.table-wrap{overflow:auto;border:1px solid var(--line);border-radius:6px;max-height:calc(100vh - 330px)}
+table.data{border-collapse:collapse;font-size:12.5px;min-width:100%}
+table.data th,table.data td{border-bottom:1px solid var(--line2);padding:5px 7px;text-align:left;white-space:nowrap;max-width:200px;overflow:hidden;text-overflow:ellipsis}
+table.data th{position:sticky;top:0;background:#f7f8fa;font-weight:600;z-index:1}
+table.data tbody tr{cursor:pointer}
+table.data tbody tr:hover{background:#f6f9ff}
+table.data tbody tr.cur{background:var(--accent-soft)}
+.st-copy{color:var(--ok);font-weight:600}
+.st-eml{color:var(--accent);font-weight:600}
+.st-warn{color:var(--warn)}
+
+/* output */
+.field{margin-bottom:10px}
+.field>label{display:block;font-size:12.5px;color:var(--muted);margin-bottom:3px}
+.field select,.field input{width:100%}
+.btn-row{display:flex;gap:6px;flex-wrap:wrap}
+.curbox{border:1px solid var(--line);border-radius:8px;padding:10px;background:#fbfbfc}
+.curbox .lbl{font-weight:600;margin-bottom:8px}
+.help{font-size:13px;line-height:1.65}
+.help ol{padding-left:18px;margin:6px 0}
+
+.audit-sum{display:flex;gap:8px;flex-wrap:wrap}
+.audit-sum .pill{border-radius:8px;padding:8px 12px;background:#f4f5f7;font-size:13px;flex:1 1 90px}
+.audit-sum .pill b{display:block;font-size:20px;line-height:1.2}
+.audit-sum .pill.e b{color:var(--danger)} .audit-sum .pill.w b{color:var(--warn)} .audit-sum .pill.o b{color:var(--ok)}
+.arow{border:1px solid var(--line);border-radius:8px;margin-bottom:8px;overflow:hidden}
+.arow.reviewed{opacity:.55}
+.arow-head{display:flex;align-items:center;gap:8px;padding:6px 10px;background:#fafbfc;border-bottom:1px solid var(--line2);cursor:pointer}
+.arow-head .lbl{font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.aitem{display:flex;gap:8px;padding:5px 10px;font-size:13px;align-items:baseline;border-top:1px solid var(--line2)}
+.aitem:first-of-type{border-top:0}
+.sev{flex:none;font-size:11px;font-weight:700;padding:1px 6px;border-radius:9px}
+.sev.error{background:#fde8e8;color:var(--danger)} .sev.warn{background:var(--warn-soft);color:var(--warn)}
+.aitem .vn{flex:none;font-weight:600}
+.aitem .val{color:var(--muted);font-family:Consolas,monospace;font-size:12px;word-break:break-all}
+.aglobal{padding:7px 10px;border-radius:6px;background:var(--warn-soft);color:var(--warn);font-size:13px;margin-bottom:6px}
+.tabs .badge.e{background:#fde8e8;color:var(--danger)}
+.st-err{color:var(--danger);font-weight:600}
+#toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%) translateY(20px);background:#1d2330;color:#fff;padding:9px 16px;border-radius:8px;opacity:0;pointer-events:none;transition:.2s;max-width:min(560px,92vw);z-index:50;font-size:13.5px}
+#toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+#toast.err{background:var(--danger)}
+#workFrame{position:absolute;left:-10000px;top:0;width:900px;height:50px;border:0}
+
+@media (max-width:1000px){
+  .layout{grid-template-columns:1fr;height:auto}
+  .card.left{height:80vh}
+  .card.right{min-height:70vh}
+  .table-wrap{max-height:50vh}
+}
+@media (max-width:600px){
+  .layout{padding:8px;gap:8px}
+  .topbar select{min-width:0;flex:1 1 100%}
+}
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <span class="brand">메일 양식 변환기</span>
+  <select id="tplSelect" title="저장된 양식"></select>
+  <button id="btnNew">새 양식</button>
+  <button id="btnSave" class="primary" title="Ctrl+S">저장</button>
+  <button id="btnSaveAs">다른 이름으로 저장</button>
+  <button id="btnRename">이름 변경</button>
+  <button id="btnDelete" class="danger">삭제</button>
+  <span class="sep"></span>
+  <button id="btnExport" title="저장된 모든 양식을 JSON 파일로 백업">내보내기</button>
+  <button id="btnImport" title="내보낸 JSON 파일에서 양식 가져오기">가져오기</button>
+  <input type="file" id="importFile" accept=".json,application/json" hidden>
+  <span id="dirtyBadge"></span>
+</header>
+
+<main class="layout">
+  <!-- LEFT: template editor / preview -->
+  <section class="card left">
+    <div class="pane-head">
+      <div class="seg" id="viewSeg">
+        <button data-view="edit" class="on">양식 편집</button>
+        <button data-view="preview">결과 미리보기</button>
+      </div>
+      <span class="spacer"></span>
+      <button id="btnToggleImport">양식 입력 / 교체</button>
+    </div>
+
+    <div id="importPanel" class="import-panel" hidden>
+      <div id="pasteZone" class="paste-zone" contenteditable="true" spellcheck="false"
+           data-ph="여기를 클릭하고 Ctrl+V — Outlook 등에서 복사한 양식을 서식 그대로 붙여넣기 (파일을 끌어다 놓아도 됩니다)"></div>
+      <div class="import-actions">
+        <button id="btnOpenFile">파일 열기</button>
+        <input type="file" id="tplFile" multiple accept=".html,.htm,.eml,.mht,.mhtml,.txt,image/*" hidden>
+        <button id="btnOpenFolder" title="Outlook에서 HTML로 저장했을 때 생긴 폴더(이미지 포함)를 통째로 선택">폴더 열기</button>
+        <input type="file" id="tplFolder" webkitdirectory multiple hidden>
+        <button id="btnSample">예시 양식 불러오기</button>
+        <span class="spacer"></span>
+        <button id="btnCloseImport" class="ghost">닫기</button>
+      </div>
+      <p class="hint">지원 형식: .html/.htm(이미지 파일을 함께 선택 가능) · .eml · .mht · .txt.
+        Outlook에서 '다른 이름으로 저장 → HTML'로 저장했다면 함께 생긴 <b>_files 폴더</b>와 html이 있는 폴더를 '폴더 열기'로 고르면 이미지까지 들어옵니다.
+        .msg 파일은 Outlook에서 본문을 복사해 붙여넣어 주세요.</p>
+    </div>
+
+    <div id="editToolbar" class="toolbar">
+      <div class="grp">
+        <button class="accent" data-cmd="mkvar" title="양식에서 드래그한 부분을 변수로 지정">선택 → 변수</button>
+        <button data-cmd="mklink" title="드래그한 글자(또는 기존 링크)의 링크 주소를 변수로 지정">선택 → 링크 변수</button>
+        <button data-cmd="detect" title="[이름] 또는 {{이름}} 형태를 찾아 변수로 지정">[ ] 자동 감지</button>
+      </div>
+      <div class="grp">
+        <button data-cmd="bold" title="굵게"><b>B</b></button>
+        <button data-cmd="italic" title="기울임"><i>I</i></button>
+        <button data-cmd="underline" title="밑줄"><u>U</u></button>
+        <label class="colorbtn" title="글자색">A<input type="color" id="foreColor" value="#c00000"></label>
+        <label class="colorbtn" title="형광펜 칠하기 (색 고르기)">▮<input type="color" id="hiliteColor" value="#ffff00"></label>
+        <label class="alpha" title="형광펜 진하기 — 색을 고르기 전에 정하세요. 글자를 선택한 상태에서 바꾸면 바로 적용됩니다"><input type="range" id="hiliteAlpha" min="10" max="100" step="10" value="100"><span id="hiliteAlphaLbl">100%</span></label>
+        <button data-cmd="clearHilite" title="선택한 부분(또는 커서가 있는 곳)의 형광펜·배경색 지우기">형광펜 지우기</button>
+        <select id="fontSize" title="글자 크기(pt)">
+          <option value="">크기</option>
+          <option>8</option><option>9</option><option>10</option><option>10.5</option><option>11</option><option>12</option>
+          <option>14</option><option>16</option><option>18</option><option>20</option><option>24</option><option>28</option><option>36</option>
+        </select>
+        <button data-cmd="removeFormat" title="선택한 부분의 서식 지우기">서식 지우기</button>
+      </div>
+      <div class="grp">
+        <button data-cmd="link" title="고정 링크 걸기">링크</button>
+        <button data-cmd="unlink" title="링크 해제">링크 해제</button>
+        <button data-cmd="image" title="커서 위치에 이미지 삽입">이미지 삽입</button>
+        <button data-cmd="replaceImg" id="btnReplaceImg" title="양식에서 이미지를 클릭한 뒤 누르세요" disabled>이미지 교체</button>
+        <input type="file" id="imgFile" accept="image/*" hidden>
+      </div>
+      <div class="grp">
+        <button data-cmd="undo" title="실행 취소">↶</button>
+        <button data-cmd="redo" title="다시 실행">↷</button>
+      </div>
+      <div class="grp">
+        <label class="alpha" title="편집 화면에서 변수 위치를 보여주는 노란 표시의 진하기 (메일에는 들어가지 않습니다)">변수 표시<input type="range" id="markAlpha" min="0" max="100" step="5" value="35"><span id="markAlphaLbl">35%</span></label>
+      </div>
+    </div>
+
+    <div id="previewBar" class="toolbar" hidden>
+      <button id="pvPrev" title="이전 행">◀</button>
+      <select id="pvRow"></select>
+      <button id="pvNext" title="다음 행">▶</button>
+      <span id="pvWarn"></span>
+      <span class="spacer"></span>
+      <button id="pvCopySubject">제목 복사</button>
+      <button id="pvCopy" class="primary">본문 복사</button>
+      <button id="pvCopyNext">복사 후 다음 ▶</button>
+    </div>
+    <div id="pvMeta" hidden></div>
+
+    <div id="warnings"></div>
+    <div class="frame-wrap">
+      <iframe id="editorFrame" title="양식 편집"></iframe>
+      <iframe id="previewFrame" title="결과 미리보기" hidden></iframe>
+    </div>
+  </section>
+
+  <!-- RIGHT: tabs -->
+  <section class="card right">
+    <nav class="tabs" id="tabs">
+      <button data-tab="vars" class="on">① 변수 <span class="badge" id="varCount">0</span></button>
+      <button data-tab="data">② 데이터 <span class="badge" id="rowCount">0</span></button>
+      <button data-tab="output">③ 출력</button>
+      <button data-tab="audit">④ 검수 <span class="badge" id="auditCount">0</span></button>
+    </nav>
+
+    <div class="tab" id="tab-vars">
+      <p class="hint" style="margin:0 0 10px">양식의 <b>[이름]</b> 형태는 자동으로 변수가 됩니다. 다른 부분은 왼쪽에서 드래그한 뒤 <b>선택 → 변수</b>를 누르세요. 바뀐 값은 원래 그 자리의 서식을 그대로 따릅니다.</p>
+      <div id="varList"></div>
+    </div>
+
+    <div class="tab" id="tab-data" hidden>
+      <div class="row-btns">
+        <button id="btnDataFile" class="primary">파일 열기 (Excel · CSV · JSON)</button>
+        <input type="file" id="dataFile" accept=".xlsx,.xls,.xlsm,.csv,.tsv,.txt,.json" hidden>
+        <select id="sheetSel" hidden title="시트 선택"></select>
+        <span class="spacer"></span>
+        <button id="btnDataClear" class="ghost">데이터 지우기</button>
+      </div>
+      <textarea id="dataPaste" placeholder="또는 엑셀에서 표를 제목 행까지 함께 복사해서 여기에 붙여넣으세요 (Ctrl+V)"></textarea>
+      <div id="dataInfo"></div>
+      <div class="table-wrap" id="dataWrap" hidden><table class="data" id="dataTable"></table></div>
+    </div>
+
+    <div class="tab" id="tab-audit" hidden>
+      <div id="auditSum" class="audit-sum"></div>
+      <div class="row-btns" style="margin:8px 0">
+        <select id="auditFilter" title="보기"><option value="all">오류 + 주의</option><option value="error">오류만</option><option value="warn">주의만</option></select>
+        <label class="chk"><input type="checkbox" id="auditHideOk" checked> 확인한 행 숨기기</label>
+        <span class="spacer"></span>
+        <button id="auditSelectClean" title="② 데이터의 체크를 오류 없는 행(또는 확인한 행)으로 바꿉니다">오류 없는 행만 선택</button>
+      </div>
+      <div id="auditGlobals"></div>
+      <div id="auditList"></div>
+      <p class="hint" style="margin-top:12px"><b>검수 항목</b> · 공란(빈 값, "-"·"N/A" 같은 사실상 빈 값, 받는 사람 이메일) · 가공 실패(수식 오류, 수식이 이 행만 적용되지 않음, 날짜로 읽히지 않음, 변환표에 없는 값) · 형식 이탈(다른 행들과 형식·자릿수·길이가 다름, 괄호 짝이 안 맞거나 끝이 끊김) · 이메일 형식·중복.
+        <br><b>오류</b>는 메일이 잘못 나갈 가능성이 높은 항목, <b>주의</b>는 한 번 확인해 볼 항목입니다. 문제가 아니면 '확인함'을 누르세요.</p>
+    </div>
+
+    <div class="tab" id="tab-output" hidden>
+      <div class="field"><label>받는 사람 (To) 열</label><select id="toCol"></select></div>
+      <div class="field"><label>참조 (CC) 열 — 선택 사항</label><select id="ccCol"></select></div>
+      <div class="field">
+        <label>제목</label>
+        <input id="subject" placeholder="예: [OOO Korean Fair] Participation Confirmation – [Name]">
+        <p class="hint">[변수 이름] 또는 {{열 이름}}을 넣으면 행마다 바뀝니다.</p>
+        <p class="hint" id="subjectPreview"></p>
+      </div>
+
+      <h4>현재 행</h4>
+      <div class="curbox">
+        <div class="lbl" id="curLabel">—</div>
+        <div class="btn-row">
+          <button id="outCopy" class="primary">본문 복사 (서식 유지)</button>
+          <button id="outCopySubject">제목 복사</button>
+          <button id="outCopyHtml">HTML 소스 복사</button>
+          <button id="outEml">.eml로 저장</button>
+        </div>
+      </div>
+
+      <h4>일괄 처리</h4>
+      <div class="curbox">
+        <div class="lbl" id="batchLabel">선택된 행 없음</div>
+        <div class="btn-row">
+          <button id="outZip" class="primary">선택한 행 .eml 일괄 저장 (ZIP)</button>
+        </div>
+        <p class="hint">② 데이터 탭의 체크박스로 대상 행을 고릅니다.</p>
+      </div>
+
+      <h4>Outlook(클래식)에서 사용하는 법</h4>
+      <div class="help">
+        <b>한 건씩 붙여넣기</b>
+        <ol>
+          <li>Outlook에서 새 메일을 엽니다 (서명은 자동으로 들어갑니다).</li>
+          <li>여기서 <b>본문 복사</b> → 메일 본문 맨 위(서명 위)를 클릭하고 Ctrl+V.</li>
+          <li><b>제목 복사</b>로 제목도 붙여넣고, 받는 사람을 넣어 보냅니다.</li>
+        </ol>
+        <b>.eml 일괄 저장</b>
+        <ol>
+          <li>ZIP을 풀고 .eml 파일을 더블클릭하면 받는 사람·제목·본문이 채워진 <b>보내기 전 새 메일</b>로 열립니다.</li>
+          <li>이 방식은 Outlook 서명이 자동으로 붙지 않습니다. <b>삽입 → 서명</b>으로 넣어 주세요.</li>
+          <li>.eml이 다른 프로그램으로 열리면: 파일 우클릭 → 연결 프로그램 → Outlook 선택.</li>
+        </ol>
+        <p class="hint">이미지는 웹 주소(https://…)로 된 것이 가장 안전합니다. 양식에 직접 들어간 이미지는 보내기 전에 한 번 테스트해 보세요.</p>
+      </div>
+    </div>
+  </section>
+</main>
+
+<iframe id="workFrame" title="work" aria-hidden="true" tabindex="-1"></iframe>
+<div id="toast"></div>
+
+<script>
+'use strict';
+/* =========================================================
+   Utilities
+   ========================================================= */
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const uid = () => 'v' + Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const clone = o => JSON.parse(JSON.stringify(o));
+const N = s => String(s ?? '').toLowerCase().replace(/[\s_\-.()\[\]{}:·]/g, '');
+let toastTimer;
+function toast(msg, err) {
+  const t = $('#toast'); t.textContent = msg; t.className = 'show' + (err ? ' err' : '');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.className = '', err ? 4200 : 2600);
+}
+function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
+function readDataURL(file) { return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(file); }); }
+function u8ToBin(u8) { let s = ''; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return s; }
+function binToU8(s) { const u = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i) & 255; return u; }
+const b64utf8 = str => btoa(u8ToBin(new TextEncoder().encode(str)));
+function download(blob, name) {
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.append(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 3000);
+}
+const today = () => { const d = new Date(); return `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`; };
+const safeName = s => String(s || '').replace(/[\\/:*?"<>|\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60);
+
+/* =========================================================
+   Storage (IndexedDB, falls back to memory)
+   ========================================================= */
+const DB = {
+  db: null, ok: false, mem: { templates: new Map(), kv: new Map() },
+  open() {
+    return new Promise(res => {
+      try {
+        const r = indexedDB.open('mail-form-converter', 1);
+        r.onupgradeneeded = () => { const d = r.result; d.createObjectStore('templates', { keyPath: 'id' }); d.createObjectStore('kv', { keyPath: 'k' }); };
+        r.onsuccess = () => { this.db = r.result; this.ok = true; res(true); };
+        r.onerror = () => res(false); r.onblocked = () => res(false);
+      } catch (e) { res(false); }
+    });
+  },
+  req(store, mode, fn) {
+    return new Promise((res, rej) => {
+      const t = this.db.transaction(store, mode); const r = fn(t.objectStore(store));
+      t.oncomplete = () => res(r && 'result' in r ? r.result : undefined); t.onerror = () => rej(t.error);
+    });
+  },
+  all(store) { return this.ok ? this.req(store, 'readonly', s => s.getAll()) : Promise.resolve([...this.mem[store].values()]); },
+  get(store, k) { return this.ok ? this.req(store, 'readonly', s => s.get(k)) : Promise.resolve(this.mem[store].get(k)); },
+  put(store, v) { return this.ok ? this.req(store, 'readwrite', s => s.put(v)) : Promise.resolve(this.mem[store].set(v.id ?? v.k, v)); },
+  del(store, k) { return this.ok ? this.req(store, 'readwrite', s => s.delete(k)) : Promise.resolve(this.mem[store].delete(k)); },
+};
+
+/* =========================================================
+   State
+   ========================================================= */
+function blankTpl() {
+  return { id: uid(), name: '', head: '', bodyStyle: '', body: '', vars: [], settings: { subject: '', toCol: '', ccCol: '' }, updatedAt: 0 };
+}
+function normVar(v) {
+  v = v || {};
+  // sources: list of {col, useFixed, fixed}. Older saves used single col/useFixed/fixed fields.
+  let srcs = Array.isArray(v.srcs) && v.srcs.length ? v.srcs : [{ col: v.col || '', useFixed: !!v.useFixed, fixed: v.fixed || '' }];
+  srcs = srcs.map(s => ({ col: s.col || '', useFixed: !!s.useFixed, fixed: s.fixed || '' }));
+  const o = Object.assign({
+    id: uid(), name: '변수', kind: 'text', fmt: 'text', dateFmt: 'MMMM D, YYYY', joiner: ' ',
+    removeEmpty: false, formula: '', map: { on: false, rows: [], fallback: 'keep', def: '' }, style: { b: '', i: '', u: '', color: '', size: '' }
+  }, v, {
+    srcs,
+    map: Object.assign({ on: false, rows: [], fallback: 'keep', def: '' }, v.map),
+    style: Object.assign({ b: '', i: '', u: '', color: '', size: '' }, v.style),
+  });
+  delete o.col; delete o.useFixed; delete o.fixed;
+  return o;
+}
+const needsData = v => v.srcs.some(s => !s.useFixed);
+const firstCol = v => { const s = v.srcs.find(x => !x.useFixed && x.col); return s ? s.col : ''; };
+function normTpl(t) {
+  const b = blankTpl(); const o = Object.assign(b, t);
+  o.settings = Object.assign({ subject: '', toCol: '', ccCol: '' }, t.settings);
+  o.vars = (t.vars || []).map(normVar);
+  return o;
+}
+const S = {
+  tpl: blankTpl(), saved: false, dirty: false, templates: [],
+  data: { headers: [], rows: [], raws: [], name: '' }, wb: null,
+  done: {}, sel: new Set(), ok: new Set(), dataVer: 0, cur: 0, view: 'edit', selImg: null, lastRange: null, imgMode: 'insert',
+};
+
+/* =========================================================
+   Frames
+   ========================================================= */
+const edFrame = $('#editorFrame'), pvFrame = $('#previewFrame'), wkFrame = $('#workFrame');
+const edDoc = () => edFrame.contentDocument;
+const EDITOR_CSS = `
+html{background:#fff}
+body{min-height:calc(100vh - 20px)}
+[data-mv]{background:rgba(255,205,40,var(--mk,.35));box-shadow:0 0 0 1px rgba(205,145,0,calc(var(--mk,.35) * 1.8));border-radius:2px;cursor:pointer}
+a[data-mv-href]{outline:2px dashed rgba(47,111,235,calc(var(--mk,.35) * 2.1));outline-offset:1px}
+.__mv-hl,.__mv-hl[data-mv]{background:rgba(255,120,0,.6)!important;outline:2px solid #ff7a00!important}
+img.__mv-local{outline:3px solid #e5484d;outline-offset:-3px}
+img.__mv-sel{outline:3px solid #2f6feb;outline-offset:-3px}`;
+function frameHtml(head, bodyStyle, body, extraCss, extraHead) {
+  const h = String(head || '').replace(/<\/style/gi, '<\\/style');
+  return `<!DOCTYPE html><html><head><meta charset="utf-8">${extraHead || ''}<style>${h}</style>${extraCss ? `<style id="__mvcss">${extraCss}</style>` : ''}</head><body${bodyStyle ? ` style="${esc(bodyStyle)}"` : ''}>${body}</body></html>`;
+}
+function writeFrame(frame, html) { const d = frame.contentDocument; d.open(); d.write(html); d.close(); return d; }
+
+/* =========================================================
+   Editor
+   ========================================================= */
+function loadEditor() {
+  const d = writeFrame(edFrame, frameHtml(S.tpl.head, S.tpl.bodyStyle, S.tpl.body || '<p><br></p>', EDITOR_CSS));
+  d.designMode = 'on';
+  try { d.execCommand('styleWithCSS', false, true); } catch (e) {}
+  d.addEventListener('input', onEditorInput);
+  d.addEventListener('click', onEditorClick);
+  d.addEventListener('selectionchange', () => {
+    const s = d.getSelection(); if (s && s.rangeCount && d.body.contains(s.anchorNode)) S.lastRange = s.getRangeAt(0).cloneRange();
+  });
+  d.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); saveTpl(false); } });
+  S.selImg = null; S.lastRange = null; $('#btnReplaceImg').disabled = true;
+  applyMarkAlpha();
+  checkWarnings();
+}
+function applyMarkAlpha() {
+  const a = +$('#markAlpha').value / 100; $('#markAlphaLbl').textContent = Math.round(a * 100) + '%';
+  const d = edDoc(); if (d && d.documentElement) d.documentElement.style.setProperty('--mk', String(a));
+  try { localStorage.setItem('mfc.markAlpha', String(a * 100)); } catch (e) {}
+}
+function blendWhite(hex, a) {
+  const n = parseInt(hex.slice(1), 16); const f = c => Math.round(255 - (255 - c) * a);
+  return '#' + [f(n >> 16), f((n >> 8) & 255), f(n & 255)].map(x => x.toString(16).padStart(2, '0')).join('');
+}
+function applyHilite() { execCmd('hiliteColor', blendWhite($('#hiliteColor').value, +$('#hiliteAlpha').value / 100)); }
+function clearHighlight() {
+  const d = restoreSel(); const s = d.getSelection();
+  if (!s.rangeCount) { toast('지울 부분을 선택하거나 하이라이트된 글자 안을 클릭하세요', true); return; }
+  if (!s.isCollapsed) { try { d.execCommand('hiliteColor', false, 'transparent'); } catch (e) {} }
+  const r = s.rangeCount ? s.getRangeAt(0) : null; if (!r) return;
+  const els = new Set();
+  [r.startContainer, r.endContainer].forEach(n => { let e = n.nodeType === 1 ? n : n.parentElement; while (e && e !== d.body) { els.add(e); e = e.parentElement; } });
+  if (!r.collapsed) {
+    const root = r.commonAncestorContainer.nodeType === 1 ? r.commonAncestorContainer : r.commonAncestorContainer.parentElement;
+    $$('*', root).forEach(e => { if (r.intersectsNode(e)) els.add(e); });
+  }
+  let n = 0;
+  els.forEach(e => {
+    if (/^(TABLE|TBODY|THEAD|TR|TD|TH|BODY|HTML)$/.test(e.tagName)) return;
+    const st = e.getAttribute('style') || '';
+    const had = /background|mso-highlight/i.test(st) || e.hasAttribute('bgcolor') || e.tagName === 'MARK';
+    if (!had) return;
+    e.style.removeProperty('background-color'); e.style.removeProperty('background');
+    let ns = (e.getAttribute('style') || '').replace(/(^|;)\s*(mso-highlight|background(-color)?)\s*:[^;]*/gi, '$1').replace(/^;+|;+$/g, '').trim();
+    if (ns) e.setAttribute('style', ns); else e.removeAttribute('style');
+    e.removeAttribute('bgcolor');
+    if (e.tagName === 'MARK') unwrap(e);
+    n++;
+  });
+  onEditorInput();
+  toast(n ? '형광펜(배경색)을 지웠습니다' : '선택한 곳에서 지울 형광펜을 찾지 못했습니다', !n);
+}
+function syncFromEditor() {
+  const d = edDoc(); if (!d || !d.body) return;
+  const c = d.body.cloneNode(true);
+  $$('.__mv-hl,.__mv-sel,.__mv-local', c).forEach(el => {
+    el.classList.remove('__mv-hl', '__mv-sel', '__mv-local'); if (!el.getAttribute('class')) el.removeAttribute('class');
+  });
+  S.tpl.body = c.innerHTML;
+}
+const onEditorInputLater = debounce(() => { syncFromEditor(); refreshCounts(); checkWarnings(); }, 350);
+function onEditorInput() { markDirty(); onEditorInputLater(); }
+function onEditorClick(e) {
+  const d = edDoc();
+  $$('img.__mv-sel', d).forEach(i => i.classList.remove('__mv-sel'));
+  S.selImg = null;
+  if (e.target.tagName === 'IMG') { e.target.classList.add('__mv-sel'); S.selImg = e.target; }
+  $('#btnReplaceImg').disabled = !S.selImg;
+  const m = e.target.closest && e.target.closest('[data-mv],a[data-mv-href]');
+  if (m) { const id = m.getAttribute('data-mv') || m.getAttribute('data-mv-href'); focusVarCard(id); }
+}
+function restoreSel() {
+  const d = edDoc(); edFrame.contentWindow.focus();
+  if (S.lastRange) { const s = d.getSelection(); s.removeAllRanges(); s.addRange(S.lastRange); }
+  return d;
+}
+function execCmd(cmd, val) {
+  const d = restoreSel();
+  try { d.execCommand(cmd, false, val); } catch (e) {}
+  onEditorInput();
+}
+function applyFontSize(pt) {
+  const d = restoreSel();
+  d.execCommand('fontSize', false, '7');
+  $$('font[size="7"]', d).forEach(f => { const s = d.createElement('span'); s.style.fontSize = pt + 'pt'; while (f.firstChild) s.appendChild(f.firstChild); f.replaceWith(s); });
+  $$('span', d).forEach(s => { if (s.style.fontSize === 'xxx-large' || s.style.fontSize === '-webkit-xxx-large') s.style.fontSize = pt + 'pt'; });
+  onEditorInput();
+}
+
+/* ---------- variables in the template ---------- */
+function findVarByName(name, kind) { const n = name.trim().toLowerCase(); return S.tpl.vars.find(v => v.name.trim().toLowerCase() === n && v.kind === kind); }
+function getOrCreateVar(name, kind) {
+  let v = findVarByName(name, kind);
+  if (!v) {
+    v = normVar({ id: uid(), name: name.trim(), kind });
+    if (S.data.headers.length) { const c = findCol(v.name); if (c) v.srcs[0].col = c; }
+    S.tpl.vars.push(v);
+  }
+  return v;
+}
+function autoDetect(silent) {
+  const d = edDoc(); if (!d || !d.body) return 0;
+  const walker = d.createTreeWalker(d.body, NodeFilter.SHOW_TEXT, { acceptNode: n => n.parentElement && n.parentElement.closest('[data-mv],style,script') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT });
+  const nodes = []; while (walker.nextNode()) nodes.push(walker.currentNode);
+  const re = /\[([^\[\]\n\r]{1,60})\]|\{\{\s*([^{}\n\r]{1,60}?)\s*\}\}/g;
+  let count = 0;
+  for (const node of nodes) {
+    const text = node.nodeValue; re.lastIndex = 0; let m, last = 0, found = false; const frag = d.createDocumentFragment();
+    while ((m = re.exec(text))) {
+      const name = (m[1] || m[2]).replace(/ /g, ' ').trim(); if (!name) continue;
+      found = true; frag.append(text.slice(last, m.index));
+      const v = getOrCreateVar(name, 'text'); const span = d.createElement('span');
+      span.setAttribute('data-mv', v.id); span.textContent = m[0]; frag.append(span);
+      last = m.index + m[0].length; count++;
+    }
+    if (found) { frag.append(text.slice(last)); node.replaceWith(frag); }
+  }
+  syncFromEditor();
+  if (count) markDirty();
+  renderVars();
+  if (!silent) toast(count ? `변수 ${count}곳을 찾았습니다` : '[이름] 형태의 표시를 찾지 못했습니다. 드래그 후 "선택 → 변수"를 써 보세요');
+  return count;
+}
+function selectionToVar(kind) {
+  const d = edDoc(); const s = d.getSelection();
+  let range = s && s.rangeCount ? s.getRangeAt(0) : S.lastRange;
+  if (!range || (range.collapsed && kind === 'text')) { toast('먼저 왼쪽 양식에서 바꿀 부분을 드래그해 선택하세요', true); return; }
+  const startEl = range.startContainer.nodeType === 1 ? range.startContainer : range.startContainer.parentElement;
+  if (kind === 'link') {
+    let a = startEl && startEl.closest('a');
+    const endEl = range.endContainer.nodeType === 1 ? range.endContainer : range.endContainer.parentElement;
+    if (!a && endEl) a = endEl.closest('a');
+    if (!a) {
+      if (range.collapsed) { toast('링크로 만들 글자를 드래그하거나 기존 링크 안을 클릭하세요', true); return; }
+      if (range.cloneContents().querySelector('p,div,table,tr,td,li,ul,ol,h1,h2,h3,h4,h5,h6')) { toast('한 줄 안에서만 선택해 주세요', true); return; }
+      a = d.createElement('a'); a.href = '#'; a.appendChild(range.extractContents()); range.insertNode(a);
+    }
+    const cur = a.getAttribute('data-mv-href'); const curVar = cur && S.tpl.vars.find(v => v.id === cur);
+    const name = prompt('링크 변수 이름 (예: 가이드 링크)', curVar ? curVar.name : '가이드 링크'); if (!name || !name.trim()) return;
+    const v = getOrCreateVar(name, 'link'); a.setAttribute('data-mv-href', v.id);
+    afterTemplateChange(v.id); return;
+  }
+  if (startEl && startEl.closest('[data-mv]')) { toast('이미 변수로 지정된 부분입니다', true); return; }
+  if (range.cloneContents().querySelector('p,div,table,tr,td,li,ul,ol,h1,h2,h3,h4,h5,h6,[data-mv]')) { toast('한 줄 안에서, 다른 변수와 겹치지 않게 선택해 주세요', true); return; }
+  const txt = range.toString().replace(/ /g, ' ').trim();
+  const name = prompt('변수 이름 (같은 이름이면 같은 값이 들어갑니다)', txt.replace(/^[\[{]+|[\]}]+$/g, '').slice(0, 30)); if (!name || !name.trim()) return;
+  const v = getOrCreateVar(name, 'text');
+  const span = d.createElement('span'); span.setAttribute('data-mv', v.id);
+  span.appendChild(range.extractContents()); range.insertNode(span);
+  s.removeAllRanges();
+  afterTemplateChange(v.id);
+}
+function afterTemplateChange(focusId) {
+  syncFromEditor(); markDirty(); renderVars(); if (focusId) focusVarCard(focusId); setTab('vars');
+}
+function unwrap(el) { const p = el.parentNode; if (!p) return; while (el.firstChild) p.insertBefore(el.firstChild, el); el.remove(); }
+function deleteVar(id) {
+  const v = S.tpl.vars.find(x => x.id === id); if (!v) return;
+  if (!confirm(`변수 "${v.name}"을(를) 삭제할까요? 양식의 글자는 그대로 남습니다.`)) return;
+  const d = edDoc();
+  $$(`[data-mv="${id}"]`, d).forEach(unwrap);
+  $$(`a[data-mv-href="${id}"]`, d).forEach(a => { a.removeAttribute('data-mv-href'); if (a.getAttribute('href') === '#') unwrap(a); });
+  S.tpl.vars = S.tpl.vars.filter(x => x.id !== id);
+  syncFromEditor(); markDirty(); renderVars(); refreshPreviewIfShown();
+}
+function locateVar(id) {
+  setView('edit');
+  const d = edDoc(); const els = $$(`[data-mv="${id}"],a[data-mv-href="${id}"]`, d);
+  if (!els.length) { toast('양식에서 이 변수를 찾을 수 없습니다', true); return; }
+  els.forEach(e => e.classList.add('__mv-hl')); els[0].scrollIntoView({ block: 'center', behavior: 'smooth' });
+  setTimeout(() => els.forEach(e => { e.classList.remove('__mv-hl'); if (!e.getAttribute('class')) e.removeAttribute('class'); }), 1600);
+}
+function checkWarnings() {
+  const d = edDoc(); const box = $('#warnings'); if (!d || !d.body) { box.textContent = ''; return; }
+  let local = 0;
+  $$('img', d).forEach(img => {
+    const src = img.getAttribute('src') || '';
+    const bad = !/^(https?:|data:)/i.test(src);
+    img.classList.toggle('__mv-local', bad); if (!img.getAttribute('class')) img.removeAttribute('class');
+    if (bad) local++;
+  });
+  box.textContent = local ? `⚠ 이미지 ${local}개가 내 PC의 파일 경로를 가리키고 있어 받는 사람에게 보이지 않습니다(빨간 테두리). 이미지를 클릭한 뒤 툴바의 '이미지 교체'로 바꾸거나, Outlook에서 HTML로 저장한 폴더를 '폴더 열기'로 다시 불러오세요.` : '';
+}
+
+/* =========================================================
+   Import template
+   ========================================================= */
+function hasTemplateContent() { const d = edDoc(); return !!((d && d.body && (d.body.textContent.trim() || d.body.querySelector('img'))) || S.tpl.vars.length); }
+function sanitizeDoc(d) {
+  $$('script,noscript,iframe,object,embed,frame,frameset,meta,link,title,base,style,xml', d).forEach(e => e.remove());
+  const w = d.createTreeWalker(d.documentElement, NodeFilter.SHOW_COMMENT); const cm = []; while (w.nextNode()) cm.push(w.currentNode); cm.forEach(c => c.remove());
+  $$('*', d).forEach(el => {
+    [...el.attributes].forEach(a => {
+      const n = a.name.toLowerCase();
+      if (n.startsWith('on')) el.removeAttribute(a.name);
+      else if ((n === 'href' || n === 'src') && /^\s*javascript:/i.test(a.value)) el.removeAttribute(a.name);
+    });
+  });
+}
+function bodyStyleOf(body) {
+  let st = (body.getAttribute('style') || '').replace(/(word-wrap|tab-interval)\s*:[^;]*;?/gi, '').trim();
+  const bg = body.getAttribute('bgcolor'); if (bg && !/background/i.test(st)) st += (st && !st.endsWith(';') ? ';' : '') + `background-color:${bg}`;
+  return st;
+}
+const baseKey = s => { try { s = decodeURIComponent(s); } catch (e) {} return s.split(/[\\/]/).pop().split('?')[0].toLowerCase(); };
+function resolveImages(d, o) {
+  const imgs = $$('img', d); const locals = [];
+  imgs.forEach(img => {
+    const src = (img.getAttribute('src') || '').trim(); let rep = null;
+    if (/^cid:/i.test(src)) rep = o.cidMap && o.cidMap[src.slice(4).replace(/[<>]/g, '').toLowerCase()];
+    else if (!/^(https?:|data:)/i.test(src)) {
+      rep = (o.locMap && (o.locMap[src.toLowerCase()] || o.locMap[baseKey(src)])) || (o.fileMap && o.fileMap[baseKey(src)]);
+      if (!rep) locals.push(img);
+    }
+    if (rep) img.setAttribute('src', rep);
+  });
+  if (o.clipImgs && o.clipImgs.length && o.clipImgs.length === locals.length) locals.forEach((img, i) => img.setAttribute('src', o.clipImgs[i]));
+}
+function applyImport(html, o = {}) {
+  if (!o.force && hasTemplateContent() && !confirm('현재 양식 내용을 새로 불러온 양식으로 바꿀까요?\n(이름이 같은 변수의 설정은 그대로 유지됩니다)')) return false;
+  const d = new DOMParser().parseFromString(html, 'text/html');
+  const head = $$('style', d).map(s => s.textContent).join('\n');
+  sanitizeDoc(d); resolveImages(d, o);
+  S.tpl.head = head; S.tpl.bodyStyle = bodyStyleOf(d.body); S.tpl.body = d.body.innerHTML.trim();
+  if (o.subject && !S.tpl.settings.subject) S.tpl.settings.subject = o.subject;
+  loadEditor(); setView('edit');
+  const n = autoDetect(true);
+  S.tpl.vars = S.tpl.vars.filter(v => varCount(v.id) > 0);
+  showImport(false); markDirty(); renderVars(); renderOutputSettings();
+  toast(n ? `양식을 불러왔고 변수 ${n}곳을 자동으로 찾았습니다` : '양식을 불러왔습니다. 바꿀 부분을 드래그한 뒤 "선택 → 변수"를 누르세요');
+  return true;
+}
+const textToHtml = t => t.replace(/\r\n?/g, '\n').split('\n').map(l => `<p>${l ? esc(l) : '<br>'}</p>`).join('');
+function decodeText(buf) {
+  const u8 = new Uint8Array(buf);
+  if (u8[0] === 0xEF && u8[1] === 0xBB && u8[2] === 0xBF) return new TextDecoder('utf-8').decode(u8.subarray(3));
+  if (u8[0] === 0xFF && u8[1] === 0xFE) return new TextDecoder('utf-16le').decode(u8.subarray(2));
+  if (u8[0] === 0xFE && u8[1] === 0xFF) return new TextDecoder('utf-16be').decode(u8.subarray(2));
+  try { return new TextDecoder('utf-8', { fatal: true }).decode(u8); } catch (e) { return new TextDecoder('euc-kr').decode(u8); }
+}
+function decodeHtml(buf) {
+  const u8 = new Uint8Array(buf);
+  if ((u8[0] === 0xEF && u8[1] === 0xBB) || (u8[0] === 0xFF && u8[1] === 0xFE) || (u8[0] === 0xFE && u8[1] === 0xFF)) return decodeText(buf);
+  const headStr = u8ToBin(u8.subarray(0, 4096)); const m = headStr.match(/charset\s*=\s*["']?([\w:-]+)/i);
+  if (m && !/utf-?8/i.test(m[1])) { try { return new TextDecoder(m[1]).decode(u8); } catch (e) {} }
+  return decodeText(buf);
+}
+/* ---- MIME (.eml / .mht) ---- */
+function parseParams(h) { const p = {}; String(h).replace(/;\s*([\w*-]+)\s*=\s*(?:"([^"]*)"|([^;\s]*))/g, (m, k, a, b) => { p[k.toLowerCase()] = a ?? b; }); return p; }
+function parseEntity(s) {
+  const m = s.match(/\r?\n\r?\n/); const hEnd = m ? m.index : s.length;
+  const hRaw = s.slice(0, hEnd); const body = m ? s.slice(hEnd + m[0].length) : '';
+  const headers = {};
+  hRaw.replace(/\r?\n[ \t]+/g, ' ').split(/\r?\n/).forEach(l => { const i = l.indexOf(':'); if (i > 0) { const k = l.slice(0, i).trim().toLowerCase(); if (!(k in headers)) headers[k] = l.slice(i + 1).trim(); } });
+  const ct = headers['content-type'] || 'text/plain'; const type = ct.split(';')[0].trim().toLowerCase(); const params = parseParams(ct);
+  const ent = { headers, type, params, body, parts: [] };
+  if (type.startsWith('multipart/') && params.boundary) {
+    const segs = body.split('--' + params.boundary);
+    for (let i = 1; i < segs.length; i++) { let seg = segs[i]; if (seg.startsWith('--')) break; ent.parts.push(parseEntity(seg.replace(/^[ \t]*\r?\n/, '').replace(/\r?\n$/, ''))); }
+  }
+  return ent;
+}
+function entBytes(e) {
+  const cte = (e.headers['content-transfer-encoding'] || '').toLowerCase();
+  if (cte === 'base64') { try { return binToU8(atob(e.body.replace(/[^A-Za-z0-9+/=]/g, ''))); } catch (x) { return new Uint8Array(); } }
+  if (cte === 'quoted-printable') return binToU8(e.body.replace(/=\r?\n/g, '').replace(/=([0-9A-Fa-f]{2})/g, (m, h) => String.fromCharCode(parseInt(h, 16))));
+  return binToU8(e.body);
+}
+function entText(e) { const b = entBytes(e); try { return new TextDecoder(e.params.charset || 'utf-8').decode(b); } catch (x) { return new TextDecoder('utf-8').decode(b); } }
+function decodeWords(s) {
+  if (!s) return '';
+  let out = s.replace(/(=\?[^?]+\?[bBqQ]\?[^?]*\?=)\s+(?==\?)/g, '$1').replace(/=\?([^?]+)\?([bBqQ])\?([^?]*)\?=/g, (m, cs, enc, txt) => {
+    try {
+      const bytes = enc.toUpperCase() === 'B' ? binToU8(atob(txt)) : binToU8(txt.replace(/_/g, ' ').replace(/=([0-9A-F]{2})/gi, (a, h) => String.fromCharCode(parseInt(h, 16))));
+      return new TextDecoder(cs).decode(bytes);
+    } catch (e) { return m; }
+  });
+  if (/[\x80-\xff]/.test(out)) { try { out = new TextDecoder('utf-8', { fatal: true }).decode(binToU8(out)); } catch (e) {} }
+  return out;
+}
+function parseMimeMessage(buf) {
+  const root = parseEntity(u8ToBin(new Uint8Array(buf)));
+  let html = null, text = null; const cidMap = {}, locMap = {};
+  (function walk(e) {
+    if (e.parts.length) { e.parts.forEach(walk); return; }
+    const disp = (e.headers['content-disposition'] || '').toLowerCase();
+    if (e.type === 'text/html' && html === null && !disp.startsWith('attachment')) html = entText(e);
+    else if (e.type === 'text/plain' && text === null && !disp.startsWith('attachment')) text = entText(e);
+    else {
+      const cid = (e.headers['content-id'] || '').replace(/[<>\s]/g, '').toLowerCase();
+      const loc = (e.headers['content-location'] || '').trim();
+      if (cid || loc) {
+        const url = `data:${e.type};base64,${btoa(u8ToBin(entBytes(e)))}`;
+        if (cid) cidMap[cid] = url;
+        if (loc) { locMap[loc.toLowerCase()] = url; locMap[baseKey(loc)] = url; }
+      }
+    }
+  })(root);
+  return { html: html ?? (text !== null ? textToHtml(text) : null), cidMap, locMap, subject: decodeWords(root.headers.subject || '') };
+}
+async function filesToMap(files) {
+  const map = {}; for (const f of files) { map[baseKey(f.name)] = await readDataURL(f); } return map;
+}
+async function importFiles(list) {
+  const files = [...list]; if (!files.length) return;
+  const isImg = f => /^image\//.test(f.type) || /\.(png|jpe?g|gif|bmp|webp|svg)$/i.test(f.name);
+  const mains = files.filter(f => /\.(html?|eml|mht|mhtml|txt)$/i.test(f.name))
+    .sort((a, b) => (a.webkitRelativePath || a.name).split('/').length - (b.webkitRelativePath || b.name).split('/').length);
+  const imgs = files.filter(isImg);
+  try {
+    if (!mains.length) {
+      if (imgs.length) { const urls = await Promise.all(imgs.map(readDataURL)); applyImport(urls.map(u => `<p><img src="${u}"></p>`).join('')); return; }
+      toast('양식 파일(.html, .eml, .mht, .txt)을 선택해 주세요', true); return;
+    }
+    const main = mains[0]; const buf = await main.arrayBuffer(); const ext = main.name.split('.').pop().toLowerCase();
+    if (ext === 'eml' || ext === 'mht' || ext === 'mhtml') {
+      const r = parseMimeMessage(buf); if (!r.html) { toast('이 파일에서 본문을 찾지 못했습니다', true); return; }
+      applyImport(r.html, { cidMap: r.cidMap, locMap: r.locMap, subject: r.subject });
+    } else if (ext === 'txt') applyImport(textToHtml(decodeText(buf)));
+    else applyImport(decodeHtml(buf), { fileMap: await filesToMap(imgs) });
+  } catch (e) { console.error(e); toast('파일을 읽는 중 오류가 났습니다: ' + e.message, true); }
+}
+function showImport(on) {
+  $('#importPanel').hidden = !on;
+  if (on) setView('edit');
+}
+
+/* =========================================================
+   Value computation & rendering
+   ========================================================= */
+const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+const DAYS = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+const KDAYS = ['일','월','화','수','목','금','토'];
+function parseDate(raw, txt) {
+  if (raw instanceof Date && !isNaN(raw)) return { y: raw.getFullYear(), m: raw.getMonth() + 1, d: raw.getDate() };
+  if (typeof raw === 'number' && raw > 59 && raw < 2958466) {
+    const dt = new Date(Date.UTC(1899, 11, 30) + Math.round(raw) * 86400000);
+    return { y: dt.getUTCFullYear(), m: dt.getUTCMonth() + 1, d: dt.getUTCDate() };
+  }
+  const s = String(txt ?? raw ?? '').trim(); let m;
+  if ((m = s.match(/^(\d{4})\s*[-./년]\s*(\d{1,2})\s*[-./월]\s*(\d{1,2})/))) return { y: +m[1], m: +m[2], d: +m[3] };
+  if ((m = s.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4}|\d{2})$/))) { let y = +m[3]; if (y < 100) y += 2000; return { y, m: +m[1], d: +m[2] }; }
+  if ((m = s.match(/^(\d{8})$/))) return { y: +s.slice(0, 4), m: +s.slice(4, 6), d: +s.slice(6, 8) };
+  const t = Date.parse(s); if (!isNaN(t) && /[a-z]/i.test(s)) { const dt = new Date(t); return { y: dt.getFullYear(), m: dt.getMonth() + 1, d: dt.getDate() }; }
+  return null;
+}
+function formatDate(o, fmt) {
+  if (o.m < 1 || o.m > 12 || o.d < 1 || o.d > 31) return null;
+  const wd = new Date(Date.UTC(o.y, o.m - 1, o.d)).getUTCDay();
+  const ord = n => n + (n % 10 === 1 && n !== 11 ? 'st' : n % 10 === 2 && n !== 12 ? 'nd' : n % 10 === 3 && n !== 13 ? 'rd' : 'th');
+  return fmt.replace(/\[([^\]]*)\]|YYYY|YY|MMMM|MMM|MM|M|Do|DD|D|dddd|ddd|aaaa|aaa/g, (t, lit) => {
+    if (lit !== undefined) return lit;
+    switch (t) {
+      case 'YYYY': return String(o.y); case 'YY': return String(o.y).slice(-2);
+      case 'MMMM': return MONTHS[o.m - 1]; case 'MMM': return MONTHS[o.m - 1].slice(0, 3);
+      case 'MM': return String(o.m).padStart(2, '0'); case 'M': return String(o.m);
+      case 'Do': return ord(o.d); case 'DD': return String(o.d).padStart(2, '0'); case 'D': return String(o.d);
+      case 'dddd': return DAYS[wd]; case 'ddd': return DAYS[wd].slice(0, 3);
+      case 'aaaa': return KDAYS[wd] + '요일'; case 'aaa': return KDAYS[wd];
+    }
+    return t;
+  });
+}
+/* =========================================================
+   Formula engine (Excel-like, no eval)
+   ========================================================= */
+class FxError extends Error { constructor(code, msg) { super(msg || code); this.code = code; } }
+function fxTokenize(s) {
+  const t = []; let i = 0;
+  while (i < s.length) {
+    const c = s[i];
+    if (/\s/.test(c)) { i++; continue; }
+    if (c === '"' || c === '“' || c === '”') {
+      let j = i + 1, str = '';
+      for (;;) {
+        if (j >= s.length) throw new FxError('#SYNTAX', '따옴표(")가 닫히지 않았습니다');
+        if (s[j] === '"' || s[j] === '”' || s[j] === '“') { if (s[j + 1] === '"') { str += '"'; j += 2; continue; } break; }
+        str += s[j++];
+      }
+      t.push({ k: 'str', v: str }); i = j + 1; continue;
+    }
+    if (c === '[') { const j = s.indexOf(']', i); if (j < 0) throw new FxError('#SYNTAX', '대괄호 [ 가 닫히지 않았습니다'); t.push({ k: 'ref', v: s.slice(i + 1, j).trim() }); i = j + 1; continue; }
+    let m = s.slice(i).match(/^(\d+\.?\d*|\.\d+)(e[+-]?\d+)?/i);
+    if (m) { t.push({ k: 'num', v: Number(m[0]) }); i += m[0].length; continue; }
+    m = s.slice(i).match(/^(<=|>=|<>|[-+*/^&=<>(),;])/);
+    if (m) { t.push({ k: 'op', v: m[0] }); i += m[0].length; continue; }
+    m = s.slice(i).match(/^[A-Za-z_ㄱ-힝][\wㄱ-힝.]*/);
+    if (m) { t.push({ k: 'id', v: m[0] }); i += m[0].length; continue; }
+    throw new FxError('#SYNTAX', `알 수 없는 기호: ${c}`);
+  }
+  return t;
+}
+function fxParse(src) {
+  src = String(src || '').trim().replace(/^=/, ''); if (!src) return null;
+  const t = fxTokenize(src); let p = 0;
+  const next = () => t[p++];
+  const isOp = (...o) => t[p] && t[p].k === 'op' && o.includes(t[p].v);
+  const cmp = () => { let a = cat(); while (isOp('=', '<>', '<', '>', '<=', '>=')) { const o = next().v; a = { k: 'bin', o, a, b: cat() }; } return a; };
+  const cat = () => { let a = add(); while (isOp('&')) { next(); a = { k: 'bin', o: '&', a, b: add() }; } return a; };
+  const add = () => { let a = mul(); while (isOp('+', '-')) { const o = next().v; a = { k: 'bin', o, a, b: mul() }; } return a; };
+  const mul = () => { let a = pow(); while (isOp('*', '/')) { const o = next().v; a = { k: 'bin', o, a, b: pow() }; } return a; };
+  const pow = () => { let a = un(); while (isOp('^')) { next(); a = { k: 'bin', o: '^', a, b: un() }; } return a; };
+  const un = () => { if (isOp('-')) { next(); return { k: 'neg', a: un() }; } if (isOp('+')) { next(); return un(); } return prim(); };
+  function prim() {
+    const tk = next(); if (!tk) throw new FxError('#SYNTAX', '수식이 중간에 끝났습니다');
+    if (tk.k === 'num' || tk.k === 'str') return { k: 'lit', v: tk.v };
+    if (tk.k === 'ref') return { k: 'ref', v: tk.v };
+    if (tk.k === 'op' && tk.v === '(') { const e = cmp(); if (!isOp(')')) throw new FxError('#SYNTAX', '괄호 ( 가 닫히지 않았습니다'); next(); return e; }
+    if (tk.k === 'id') {
+      const name = tk.v.toUpperCase();
+      if (isOp('(')) {
+        next(); const args = [];
+        if (!isOp(')')) { do { args.push(cmp()); } while (isOp(',', ';') && next()); }
+        if (!isOp(')')) throw new FxError('#SYNTAX', `${tk.v}( 의 괄호가 닫히지 않았거나 쉼표가 빠졌습니다`);
+        next();
+        const def = FX[name]; if (!def) throw new FxError('#NAME?', `모르는 함수: ${tk.v}`);
+        if (args.length < def.min || args.length > def.max) throw new FxError('#N/A', `${name} 함수의 인수 개수가 맞지 않습니다 (${def.min}${def.max !== def.min ? '~' + (def.max === Infinity ? '' : def.max) : ''}개)`);
+        return { k: 'fn', n: name, args };
+      }
+      if (tk.v === '값' || name === 'VALUE' || name === 'THIS') return { k: 'val' };
+      const vm = tk.v.match(/^(?:값|VALUE)(\d+)$/i); if (vm) return { k: 'valn', i: +vm[1] };
+      if (name === 'TRUE') return { k: 'lit', v: true };
+      if (name === 'FALSE') return { k: 'lit', v: false };
+      throw new FxError('#NAME?', `모르는 이름: ${tk.v} — 다른 열은 [열 이름], 글자는 "따옴표"로 감싸세요`);
+    }
+    throw new FxError('#SYNTAX', `예상하지 못한 기호: ${tk.v}`);
+  }
+  const ast = cmp();
+  if (p < t.length) throw new FxError('#SYNTAX', `예상하지 못한 부분: ${t[p].v}`);
+  return ast;
+}
+const fxCache = new Map();
+function fxCompile(src) {
+  if (fxCache.has(src)) { const c = fxCache.get(src); if (c.err) throw c.err; return c.ast; }
+  try { const ast = fxParse(src); fxCache.set(src, { ast }); return ast; }
+  catch (e) { fxCache.set(src, { err: e }); throw e; }
+}
+function fxNumStr(n) { return Number.isInteger(n) ? String(n) : String(parseFloat(n.toPrecision(15))); }
+function fxStr(v) {
+  if (v === true) return 'TRUE'; if (v === false) return 'FALSE';
+  if (typeof v === 'number') return fxNumStr(v);
+  if (v instanceof Date) return formatDate({ y: v.getFullYear(), m: v.getMonth() + 1, d: v.getDate() }, 'YYYY-MM-DD');
+  return String(v ?? '');
+}
+function fxNum(v) {
+  if (typeof v === 'number') return v; if (typeof v === 'boolean') return v ? 1 : 0;
+  const s = fxStr(v).trim().replace(/,/g, ''); if (s === '') return 0;
+  const n = Number(s); if (isNaN(n)) throw new FxError('#VALUE!', `숫자가 아닌 값입니다: "${fxStr(v)}"`); return n;
+}
+function fxBool(v) {
+  if (typeof v === 'boolean') return v; if (typeof v === 'number') return v !== 0;
+  const s = fxStr(v).trim().toUpperCase(); if (s === 'TRUE') return true; if (s === 'FALSE' || s === '') return false;
+  const n = Number(s); if (!isNaN(n)) return n !== 0;
+  throw new FxError('#VALUE!', `참/거짓으로 볼 수 없는 값입니다: "${fxStr(v)}"`);
+}
+function fxCmp(a, b) {
+  const numLike = x => typeof x === 'number' || (typeof x === 'string' && x.trim() !== '' && !isNaN(Number(x.trim().replace(/,/g, ''))));
+  if (numLike(a) && numLike(b)) { const x = fxNum(a), y = fxNum(b); return x < y ? -1 : x > y ? 1 : 0; }
+  const x = fxStr(a).toLowerCase(), y = fxStr(b).toLowerCase(); return x < y ? -1 : x > y ? 1 : 0;
+}
+function fxEval(n, ctx) {
+  switch (n.k) {
+    case 'lit': return n.v;
+    case 'val': return ctx.value;
+    case 'valn': {
+      const vs = ctx.values || [ctx.value];
+      if (n.i < 1 || n.i > vs.length) throw new FxError('#REF!', `값${n.i}이(가) 없습니다 — '값'에 데이터가 ${vs.length}개 있습니다`);
+      return vs[n.i - 1];
+    }
+    case 'ref': return ctx.ref(n.v);
+    case 'neg': return -fxNum(fxEval(n.a, ctx));
+    case 'fn': { const def = FX[n.n]; return def.lazy ? def.f(n.args, ctx) : def.f(...n.args.map(a => fxEval(a, ctx))); }
+    case 'bin': {
+      const a = fxEval(n.a, ctx), b = fxEval(n.b, ctx);
+      switch (n.o) {
+        case '&': return fxStr(a) + fxStr(b);
+        case '+': return fxNum(a) + fxNum(b);
+        case '-': return fxNum(a) - fxNum(b);
+        case '*': return fxNum(a) * fxNum(b);
+        case '/': { const d = fxNum(b); if (d === 0) throw new FxError('#DIV/0!', '0으로 나눌 수 없습니다'); return fxNum(a) / d; }
+        case '^': return Math.pow(fxNum(a), fxNum(b));
+        case '=': return fxCmp(a, b) === 0; case '<>': return fxCmp(a, b) !== 0;
+        case '<': return fxCmp(a, b) < 0; case '>': return fxCmp(a, b) > 0;
+        case '<=': return fxCmp(a, b) <= 0; case '>=': return fxCmp(a, b) >= 0;
+      }
+    }
+  }
+  throw new FxError('#ERR', '수식을 계산할 수 없습니다');
+}
+function fxRegex(p, flags) { try { return new RegExp(fxStr(p), flags); } catch (e) { throw new FxError('#VALUE!', '정규식 패턴이 올바르지 않습니다: ' + fxStr(p)); } }
+function fxInt(v, name) { const n = Math.trunc(fxNum(v)); if (n < 0) throw new FxError('#VALUE!', `${name}에는 0 이상의 숫자가 필요합니다`); return n; }
+function fxNth(s, d, inst, before) {
+  s = fxStr(s); d = fxStr(d); let k = inst === undefined ? 1 : Math.trunc(fxNum(inst));
+  if (k === 0) throw new FxError('#VALUE!', '번호는 0이 될 수 없습니다');
+  if (d === '') return before ? '' : s;
+  let idx = -1;
+  if (k > 0) { let from = 0; for (let i = 0; i < k; i++) { idx = s.indexOf(d, from); if (idx < 0) break; from = idx + d.length; } }
+  else { let from = s.length; for (let i = 0; i < -k; i++) { idx = s.lastIndexOf(d, from); if (idx < 0) break; from = idx - 1; if (from < 0 && i < -k - 1) { idx = -1; break; } } }
+  if (idx < 0) return null;
+  return before ? s.slice(0, idx) : s.slice(idx + d.length);
+}
+function fxTextFormat(v, f) {
+  f = fxStr(f);
+  if (/^[0#,.]+%?$/.test(f)) {
+    const pct = f.endsWith('%'); const body = f.replace('%', '');
+    const [ip, dp = ''] = body.split('.'); const dec = dp.replace(/[^0#]/g, '').length; const minInt = (ip.match(/0/g) || []).length;
+    const n = fxNum(v) * (pct ? 100 : 1); let [i, d] = Math.abs(n).toFixed(dec).split('.');
+    i = i.padStart(minInt, '0'); if (minInt === 0 && i === '0' && dec) i = '0';
+    if (ip.includes(',')) i = i.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    return (n < 0 ? '-' : '') + i + (d ? '.' + d : '') + (pct ? '%' : '');
+  }
+  const o = parseDate(v instanceof Date || typeof v === 'number' ? v : fxStr(v), fxStr(v));
+  if (!o) throw new FxError('#VALUE!', `날짜로 읽을 수 없는 값입니다: "${fxStr(v)}"`);
+  const wd = new Date(Date.UTC(o.y, o.m - 1, o.d)).getUTCDay();
+  return f.replace(/\[([^\]]*)\]|"([^"]*)"|yyyy|yy|mmmm|mmm|mm|m|dddd|ddd|dd|d|aaaa|aaa/gi, (t, l1, l2) => {
+    if (l1 !== undefined) return l1; if (l2 !== undefined) return l2;
+    switch (t.toLowerCase()) {
+      case 'yyyy': return String(o.y); case 'yy': return String(o.y).slice(-2);
+      case 'mmmm': return MONTHS[o.m - 1]; case 'mmm': return MONTHS[o.m - 1].slice(0, 3);
+      case 'mm': return String(o.m).padStart(2, '0'); case 'm': return String(o.m);
+      case 'dddd': return DAYS[wd]; case 'ddd': return DAYS[wd].slice(0, 3);
+      case 'dd': return String(o.d).padStart(2, '0'); case 'd': return String(o.d);
+      case 'aaaa': return KDAYS[wd] + '요일'; case 'aaa': return KDAYS[wd];
+    }
+    return t;
+  });
+}
+const F = (min, max, f) => ({ min, max, f });
+const L = (min, max, f) => ({ min, max, f, lazy: true });
+const FX = {
+  LEFT: F(1, 2, (t, n = 1) => fxStr(t).slice(0, fxInt(n, 'LEFT'))),
+  RIGHT: F(1, 2, (t, n = 1) => { const k = fxInt(n, 'RIGHT'); return k ? fxStr(t).slice(-k) : ''; }),
+  MID: F(3, 3, (t, s, n) => { const st = Math.trunc(fxNum(s)); if (st < 1) throw new FxError('#VALUE!', 'MID 시작 위치는 1 이상이어야 합니다'); return fxStr(t).substr(st - 1, fxInt(n, 'MID')); }),
+  LEN: F(1, 1, t => fxStr(t).length),
+  TRIM: F(1, 1, t => fxStr(t).replace(/[\s ]+/g, ' ').trim()),
+  UPPER: F(1, 1, t => fxStr(t).toUpperCase()),
+  LOWER: F(1, 1, t => fxStr(t).toLowerCase()),
+  PROPER: F(1, 1, t => fxStr(t).toLowerCase().replace(/(^|[^a-zÀ-ɏ'])([a-zÀ-ɏ])/g, (m, a, b) => a + b.toUpperCase())),
+  SUBSTITUTE: F(3, 4, (t, o, nw, inst) => {
+    t = fxStr(t); o = fxStr(o); nw = fxStr(nw); if (!o) return t;
+    if (inst === undefined) return t.split(o).join(nw);
+    const k = Math.trunc(fxNum(inst)); let idx = -1, from = 0;
+    for (let i = 0; i < k; i++) { idx = t.indexOf(o, from); if (idx < 0) return t; from = idx + o.length; }
+    return t.slice(0, idx) + nw + t.slice(idx + o.length);
+  }),
+  REPLACE: F(4, 4, (t, s, n, nw) => { t = fxStr(t); const st = Math.max(1, Math.trunc(fxNum(s))); return t.slice(0, st - 1) + fxStr(nw) + t.slice(st - 1 + fxInt(n, 'REPLACE')); }),
+  FIND: F(2, 3, (f, t, s = 1) => { const i = fxStr(t).indexOf(fxStr(f), Math.trunc(fxNum(s)) - 1); if (i < 0) throw new FxError('#VALUE!', `"${fxStr(f)}"을(를) 찾지 못했습니다`); return i + 1; }),
+  SEARCH: F(2, 3, (f, t, s = 1) => { const i = fxStr(t).toLowerCase().indexOf(fxStr(f).toLowerCase(), Math.trunc(fxNum(s)) - 1); if (i < 0) throw new FxError('#VALUE!', `"${fxStr(f)}"을(를) 찾지 못했습니다`); return i + 1; }),
+  CONCAT: F(1, Infinity, (...a) => a.map(fxStr).join('')),
+  CONCATENATE: F(1, Infinity, (...a) => a.map(fxStr).join('')),
+  TEXTJOIN: F(3, Infinity, (d, ign, ...a) => { const ig = fxBool(ign); return a.map(fxStr).filter(x => !ig || x !== '').join(fxStr(d)); }),
+  TEXTBEFORE: F(2, 6, (t, d, inst, mm, me, nf) => { const r = fxNth(t, d, inst, true); if (r === null) { if (nf !== undefined) return nf; throw new FxError('#N/A', `구분자 "${fxStr(d)}"을(를) 찾지 못했습니다`); } return r; }),
+  TEXTAFTER: F(2, 6, (t, d, inst, mm, me, nf) => { const r = fxNth(t, d, inst, false); if (r === null) { if (nf !== undefined) return nf; throw new FxError('#N/A', `구분자 "${fxStr(d)}"을(를) 찾지 못했습니다`); } return r; }),
+  SPLIT: F(3, 3, (t, d, n) => { const parts = fxStr(t).split(fxStr(d)); let k = Math.trunc(fxNum(n)); if (k < 0) k = parts.length + k + 1; return (parts[k - 1] ?? '').trim(); }),
+  REPT: F(2, 2, (t, n) => fxStr(t).repeat(Math.min(1000, fxInt(n, 'REPT')))),
+  EXACT: F(2, 2, (a, b) => fxStr(a) === fxStr(b)),
+  REGEXEXTRACT: F(2, 3, (t, p, g) => { const m = fxRegex(p).exec(fxStr(t)); if (!m) throw new FxError('#N/A', '패턴과 일치하는 부분이 없습니다'); const k = g === undefined ? (m.length > 1 ? 1 : 0) : Math.trunc(fxNum(g)); return m[k] ?? ''; }),
+  REGEXREPLACE: F(3, 3, (t, p, r) => fxStr(t).replace(fxRegex(p, 'g'), fxStr(r))),
+  REGEXMATCH: F(2, 2, (t, p) => fxRegex(p).test(fxStr(t))),
+  VALUE: F(1, 1, v => fxNum(v)),
+  TEXT: F(2, 2, (v, f) => fxTextFormat(v, f)),
+  ROUND: F(1, 2, (x, d = 0) => { const k = Math.pow(10, Math.trunc(fxNum(d))); return Math.round(fxNum(x) * k) / k; }),
+  ROUNDUP: F(1, 2, (x, d = 0) => { const k = Math.pow(10, Math.trunc(fxNum(d))); const v = fxNum(x); return Math.sign(v) * Math.ceil(Math.abs(v) * k) / k; }),
+  ROUNDDOWN: F(1, 2, (x, d = 0) => { const k = Math.pow(10, Math.trunc(fxNum(d))); const v = fxNum(x); return Math.sign(v) * Math.floor(Math.abs(v) * k) / k; }),
+  INT: F(1, 1, x => Math.floor(fxNum(x))),
+  ABS: F(1, 1, x => Math.abs(fxNum(x))),
+  MOD: F(2, 2, (a, b) => { const d = fxNum(b); if (!d) throw new FxError('#DIV/0!', '0으로 나눌 수 없습니다'); const r = fxNum(a) % d; return r && (r < 0) !== (d < 0) ? r + d : r; }),
+  MAX: F(1, Infinity, (...a) => Math.max(...a.map(fxNum))),
+  MIN: F(1, Infinity, (...a) => Math.min(...a.map(fxNum))),
+  SUM: F(1, Infinity, (...a) => a.reduce((s, x) => s + fxNum(x), 0)),
+  TODAY: F(0, 0, () => new Date()),
+  AND: F(1, Infinity, (...a) => a.every(fxBool)),
+  OR: F(1, Infinity, (...a) => a.some(fxBool)),
+  NOT: F(1, 1, a => !fxBool(a)),
+  ISBLANK: F(1, 1, a => fxStr(a).trim() === ''),
+  ISNUMBER: F(1, 1, a => typeof a === 'number' || (fxStr(a).trim() !== '' && !isNaN(Number(fxStr(a).trim().replace(/,/g, ''))))),
+  IF: L(2, 3, (a, c) => fxBool(fxEval(a[0], c)) ? fxEval(a[1], c) : (a[2] ? fxEval(a[2], c) : '')),
+  IFERROR: L(2, 2, (a, c) => { try { return fxEval(a[0], c); } catch (e) { if (e instanceof FxError) return fxEval(a[1], c); throw e; } }),
+  ISERROR: L(1, 1, (a, c) => { try { fxEval(a[0], c); return false; } catch (e) { if (e instanceof FxError) return true; throw e; } }),
+  IFS: L(2, Infinity, (a, c) => { for (let i = 0; i + 1 < a.length; i += 2) if (fxBool(fxEval(a[i], c))) return fxEval(a[i + 1], c); throw new FxError('#N/A', 'IFS: 맞는 조건이 없습니다 (마지막에 TRUE, "기본값"을 넣어 보세요)'); }),
+  SWITCH: L(3, Infinity, (a, c) => {
+    const v = fxEval(a[0], c);
+    for (let i = 1; i + 1 < a.length; i += 2) if (fxCmp(v, fxEval(a[i], c)) === 0) return fxEval(a[i + 1], c);
+    if (a.length % 2 === 0) return fxEval(a[a.length - 1], c);
+    throw new FxError('#N/A', 'SWITCH: 맞는 값이 없습니다 (마지막에 기본값을 넣어 보세요)');
+  }),
+  COL: F(1, 1, () => ''), // replaced below (needs ctx)
+};
+FX.COL = L(1, 1, (a, c) => c.ref(fxStr(fxEval(a[0], c))));
+const FX_PRESETS = [
+  ['앞의 (괄호) 부분 지우기 — (KR) 한빛무역 → 한빛무역', String.raw`REGEXREPLACE(값, "^\s*[(\[][^)\]]*[)\]]\s*", "")`],
+  ['괄호 안의 값만 — (KR) 한빛무역 → KR', String.raw`IFERROR(REGEXEXTRACT(값, "\(([^)]*)\)"), "")`],
+  ['뒤 4자리 (숫자만 세기) — 010-1234-5678 → 5678', String.raw`RIGHT(REGEXREPLACE(값, "\D", ""), 4)`],
+  ['숫자만 남기기 — 010-1234-5678 → 01012345678', String.raw`REGEXREPLACE(값, "\D", "")`],
+  ['특정 글자 앞까지 — 홍길동 (팀장) → 홍길동', 'TRIM(TEXTBEFORE(값, "(", 1, 0, 0, 값))'],
+  ['특정 글자 뒤부터 — Seoul / COEX → COEX', 'TRIM(TEXTAFTER(값, "/", 1, 0, 0, 값))'],
+  ['구분자로 나눈 n번째 조각 — A, B, C → B', 'SPLIT(값, ",", 2)'],
+  ['다른 열과 이어 붙이기', '값 & " " & [다른 열 이름]'],
+  ['비어 있으면 다른 문구', 'IF(값 = "", "TBD", 값)'],
+  ['값에 따라 다른 문구', 'SWITCH(값, "KR", "안녕하세요", "JP", "こんにちは", "Hello")'],
+  ['모두 대문자', 'UPPER(값)'],
+  ['단어 첫 글자만 대문자 — hanbit trading → Hanbit Trading', 'PROPER(값)'],
+  ['날짜 형식 — 2027-03-03 → March 3, 2027 (Wed)', 'TEXT(값, "mmmm d, yyyy (ddd)")'],
+  ['숫자 천 단위 쉼표 — 1234567 → 1,234,567', 'TEXT(값, "#,##0")'],
+];
+const FX_HELP = `<div class="fxhelp">
+  <p><code>값</code> = 위 '값'에서 고른 열(또는 고정값)의 내용 (여러 개면 합친 결과) · <code>값1</code>, <code>값2</code>… = 각각의 데이터 · <code>[열 이름]</code> = 같은 행의 다른 열 · 글자는 <code>"큰따옴표"</code> · <code>&amp;</code>로 이어 붙이기 · 맨 앞 <code>=</code>는 있어도 없어도 됩니다.</p>
+  <p><b>자르기</b> LEFT(값,n) · RIGHT(값,n) · MID(값,시작,n) · TEXTBEFORE(값,"구분자") · TEXTAFTER(값,"구분자") · SPLIT(값,"구분자",n번째)</p>
+  <p><b>바꾸기</b> SUBSTITUTE(값,"찾을것","바꿀것") · REPLACE · TRIM · UPPER · LOWER · PROPER · REGEXREPLACE(값,"패턴","바꿀것")</p>
+  <p><b>찾기</b> FIND · SEARCH · LEN · REGEXEXTRACT(값,"패턴") · REGEXMATCH</p>
+  <p><b>조건</b> IF(조건,참,거짓) · IFS · SWITCH(값,"a","결과a",…,"기본") · IFERROR(수식,"오류시") · AND · OR · NOT · ISBLANK · EXACT</p>
+  <p><b>숫자·날짜</b> TEXT(값,"yyyy-mm-dd") · TEXT(값,"#,##0") · VALUE · ROUND · INT · ABS · MOD · SUM · TODAY()</p>
+  <p><b>합치기</b> CONCAT · TEXTJOIN(", ",TRUE,…) · REPT · 비교: = &lt;&gt; &lt; &gt; &lt;= &gt;=</p>
+  <p><b>패턴(정규식)</b> <code>\\d</code> 숫자 · <code>\\D</code> 숫자 아닌 것 · <code>\\s</code> 공백 · <code>^</code> 시작 · <code>$</code> 끝 · <code>.*?</code> 아무 글자</p>
+</div>`;
+function refCell(ri, name) {
+  if (!hasData()) return '';
+  const H = S.data.headers; let ci = H.indexOf(name);
+  if (ci < 0) ci = H.findIndex(h => h.trim().toLowerCase() === String(name).trim().toLowerCase());
+  if (ci < 0) ci = H.findIndex(h => N(h) === N(name));
+  if (ci < 0) throw new FxError('#REF!', `열을 찾을 수 없습니다: [${name}]`);
+  return String(S.data.rows[ri] ? S.data.rows[ri][ci] ?? '' : '').trim();
+}
+
+const DATE_PRESETS = ['MMMM D, YYYY', 'MMMM D, YYYY (ddd)', 'dddd, MMMM D, YYYY', 'MMM D (ddd)', 'D MMMM YYYY', 'YYYY-MM-DD', 'YYYY.MM.DD (ddd)', 'YYYY년 M월 D일 (aaa)', 'M월 D일 (aaa)'];
+const hasData = () => S.data.rows.length > 0;
+function cellOf(ri, col) {
+  const ci = S.data.headers.indexOf(col); if (ci < 0 || !S.data.rows[ri]) return { txt: '', raw: '' };
+  const txt = S.data.rows[ri][ci]; const raw = S.data.raws[ri] ? S.data.raws[ri][ci] : txt;
+  return { txt: String(txt ?? ''), raw };
+}
+function computeVal(v, ri) { return computeValEx(v, ri).val; }
+function computeValEx(v, ri) {
+  let txt = '', raw = '', err = null;
+  if (needsData(v) && !hasData()) return { val: v.kind === 'link' ? '' : `[${v.name}]`, err: null };
+  const cells = v.srcs.map(s => s.useFixed ? { txt: s.fixed || '', raw: s.fixed || '' } : cellOf(ri, s.col));
+  const parts = cells.map(c => String(c.txt ?? '').trim());
+  if (cells.length === 1) { txt = parts[0]; raw = cells[0].raw; }
+  else { const j = String(v.joiner ?? ' ').replace(/\\n/g, '\n'); txt = parts.filter(p => p !== '').join(j); raw = txt; }
+  const tr = { parts, input: txt, fxOn: false, fxOut: null, mapMiss: false, mapKey: '', dateFail: false };
+  if (v.fmt === 'formula' && String(v.formula || '').trim()) {
+    tr.fxOn = true;
+    try { const r = fxEval(fxCompile(v.formula), { value: txt, values: parts, ref: name => refCell(ri, name) }); txt = fxStr(r).trim(); raw = txt; tr.fxOut = txt; }
+    catch (e) { err = e instanceof FxError ? e : new FxError('#ERR', e.message); txt = ''; raw = ''; }
+  }
+  if (v.map.on && v.map.rows.length && !err) {
+    const key = N(txt); const hit = v.map.rows.find(r => N(r.k) === key && String(r.k).trim() !== '');
+    if (hit) { txt = String(hit.v ?? ''); raw = txt; }
+    else {
+      if (txt !== '') { tr.mapMiss = true; tr.mapKey = txt; }
+      if (v.map.fallback === 'empty') txt = '';
+      else if (v.map.fallback === 'default') { txt = v.map.def || ''; raw = txt; }
+    }
+  }
+  if (v.kind === 'text' && v.fmt === 'date' && txt !== '') {
+    const p = parseDate(raw, txt); const f = p ? formatDate(p, v.dateFmt || 'YYYY-MM-DD') : null;
+    if (f !== null) txt = f; else tr.dateFail = true;
+  }
+  return { val: txt, err, tr };
+}
+function safeHref(val) {
+  let s = String(val || '').trim(); if (!s) return '';
+  if (/^\s*(javascript|vbscript|data):/i.test(s)) return '';
+  if (/^[\w.+-]+@[\w-]+\.[\w.-]+$/.test(s)) return 'mailto:' + s;
+  if (/^www\./i.test(s)) return 'https://' + s;
+  return s;
+}
+function setTextPreserve(el, val) {
+  const doc = el.ownerDocument; const lines = String(val).split(/\r?\n/);
+  const w = doc.createTreeWalker(el, NodeFilter.SHOW_TEXT); const texts = []; while (w.nextNode()) texts.push(w.currentNode);
+  const first = texts.find(t => t.nodeValue.trim()) || texts[0];
+  if (!first) { el.textContent = val; return; }
+  texts.forEach(t => { if (t !== first) t.nodeValue = ''; });
+  first.nodeValue = lines[0];
+  let ref = first;
+  for (let i = 1; i < lines.length; i++) { const br = doc.createElement('br'); const t = doc.createTextNode(lines[i]); ref.after(br, t); ref = t; }
+}
+function styleCss(st) {
+  const a = [];
+  if (st.b === 'on') a.push('font-weight:bold'); else if (st.b === 'off') a.push('font-weight:normal');
+  if (st.i === 'on') a.push('font-style:italic'); else if (st.i === 'off') a.push('font-style:normal');
+  if (st.u === 'on') a.push('text-decoration:underline'); else if (st.u === 'off') a.push('text-decoration:none');
+  if (st.color) a.push('color:' + st.color);
+  if (st.size) a.push(`font-size:${parseFloat(st.size)}pt`);
+  return a.join(';');
+}
+const BLOCK_RE = /^(P|DIV|LI|TR|TD|TH|H[1-6]|BODY|TABLE|TBODY|THEAD|UL|OL|BLOCKQUOTE|SECTION|ARTICLE|CENTER|PRE|DL|DT|DD)$/;
+function removeLine(el) {
+  if (!el.isConnected) return;
+  let node = el;
+  while (node.parentElement && !BLOCK_RE.test(node.parentElement.tagName)) node = node.parentElement;
+  const block = node.parentElement; if (!block) { el.remove(); return; }
+  const isBreak = n => n.nodeType === 1 && (n.tagName === 'BR' || BLOCK_RE.test(n.tagName));
+  let start = node, end = node;
+  while (start.previousSibling && !isBreak(start.previousSibling)) start = start.previousSibling;
+  while (end.nextSibling && !isBreak(end.nextSibling)) end = end.nextSibling;
+  const lineNodes = []; for (let n = start; ; n = n.nextSibling) { lineNodes.push(n); if (n === end) break; }
+  const rest = lineNodes.map(n => {
+    if (n.nodeType === 3) return n.nodeValue;
+    if (n.nodeType !== 1) return '';
+    if (n.hasAttribute('data-mv-rm')) return '';
+    const c = n.cloneNode(true); $$('[data-mv-rm]', c).forEach(x => x.remove()); return c.textContent;
+  }).join('');
+  if (rest.replace(/[\s ​]/g, '') !== '' || lineNodes.some(n => n.nodeType === 1 && n.tagName !== 'BR' && !n.hasAttribute('data-mv-rm') && n.querySelector && n.querySelector('img'))) { el.remove(); return; }
+  const prev = start.previousSibling, next = end.nextSibling;
+  const onlyLine = !prev && (!next || (next.tagName === 'BR' && !next.nextSibling));
+  if (onlyLine && !/^(BODY|TD|TH)$/.test(block.tagName)) { block.remove(); return; }
+  lineNodes.forEach(n => n.remove());
+  if (next && next.tagName === 'BR') next.remove(); else if (prev && prev.tagName === 'BR') prev.remove();
+}
+function renderBody(ri) {
+  const d = new DOMParser().parseFromString('<!DOCTYPE html><html><head></head><body>' + (S.tpl.body || '') + '</body></html>', 'text/html');
+  const byId = Object.fromEntries(S.tpl.vars.map(v => [v.id, v]));
+  const rm = [];
+  $$('[data-mv]', d).forEach(el => {
+    const v = byId[el.getAttribute('data-mv')]; if (!v) { unwrap(el); return; }
+    const val = computeVal(v, ri);
+    if (val === '' && v.removeEmpty) { el.setAttribute('data-mv-rm', ''); rm.push(el); return; }
+    setTextPreserve(el, val);
+    const css = styleCss(v.style); if (css) el.setAttribute('style', css);
+  });
+  $$('a[data-mv-href]', d).forEach(a => {
+    const v = byId[a.getAttribute('data-mv-href')]; a.removeAttribute('data-mv-href'); if (!v) return;
+    let href = safeHref(computeVal(v, ri));
+    if (!hasData() && needsData(v)) href = '#';
+    if (!href) { if (v.removeEmpty) { a.setAttribute('data-mv-rm', ''); rm.push(a); } else unwrap(a); return; }
+    a.setAttribute('href', href);
+  });
+  rm.forEach(removeLine);
+  $$('[data-mv-rm]', d).forEach(e => e.remove());
+  $$('[data-mv]', d).forEach(el => { if (!el.getAttribute('style')) unwrap(el); else el.removeAttribute('data-mv'); });
+  return d.body.innerHTML;
+}
+function renderSubject(ri) {
+  return (S.tpl.settings.subject || '').replace(/\[([^\[\]]+)\]|\{\{\s*([^{}]+?)\s*\}\}/g, (m, a, b) => {
+    const name = (a || b).trim().toLowerCase();
+    const v = S.tpl.vars.find(x => x.name.trim().toLowerCase() === name && x.kind === 'text') || S.tpl.vars.find(x => x.name.trim().toLowerCase() === name);
+    if (v) { const r = computeVal(v, ri); return r; }
+    const ci = S.data.headers.findIndex(h => h.trim().toLowerCase() === name);
+    if (ci >= 0 && S.data.rows[ri]) return String(S.data.rows[ri][ci] ?? '').trim();
+    return m;
+  });
+}
+function rowMissing(ri) {
+  if (!hasData()) return [];
+  const out = [];
+  S.tpl.vars.forEach(v => {
+    if (!varCount(v.id)) return;
+    const r = computeValEx(v, ri);
+    if (r.err) out.push(`${v.name}(수식 오류)`); else if (!v.removeEmpty && r.val === '') out.push(v.name);
+  });
+  return out;
+}
+function rowLabel(ri) {
+  const r = S.data.rows[ri]; if (!r) return '';
+  const nameVar = S.tpl.vars.find(v => firstCol(v) && /name|이름|회사|업체|company/i.test(v.name));
+  const val = nameVar ? cellOf(ri, firstCol(nameVar)).txt : (r.find(c => String(c).trim()) || '');
+  return `#${ri + 1}  ${String(val).trim()}`;
+}
+
+/* ---------- audit (검수) ---------- */
+const PLACEHOLDER_RE = /^(-+|—+|–+|\.+|\?+|n\/?a|none|null|nil|tbd|tba|미정|없음|해당\s*없음|미입력|x)$/i;
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+let auditMemo = { key: null, res: null };
+function unbalanced(s) {
+  const cnt = (re) => (s.match(re) || []).length;
+  return cnt(/\(/g) !== cnt(/\)/g) || cnt(/\[/g) !== cnt(/\]/g) || cnt(/“/g) !== cnt(/”/g) || cnt(/"/g) % 2 === 1;
+}
+function shapeSig(s) {
+  return s.replace(/[A-Za-z]+/g, 'A').replace(/[가-힣ㄱ-ㅎ]+/g, '가').replace(/\d+/g, '9').replace(/\s+/g, ' ');
+}
+function outliers(vals) {
+  // vals: array (by row) of string|null. Returns [{ri,msg,val}]
+  const items = vals.map((v, ri) => ({ ri, v })).filter(x => x.v !== null && x.v !== '');
+  const n = items.length; const out = []; if (n < 5) return out;
+  const flagged = new Set();
+  const majority = fn => {
+    const groups = new Map(); items.forEach(x => { const k = fn(x.v); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(x); });
+    let best = null; groups.forEach((list, k) => { if (!best || list.length > best.list.length) best = { k, list }; });
+    return best && best.list.length / n >= 0.8 && best.list.length < n ? { k: best.k, groups } : null;
+  };
+  const lens = items.map(x => x.v.length).sort((a, b) => a - b); const med = lens[Math.floor(n / 2)]; const maxL = lens[n - 1];
+  const checks = [
+    [s => /^\s*[(\[]/.test(s), (k, x) => k ? '다른 행들은 대부분 괄호로 시작하는데 이 행은 아닙니다' : '다른 행들과 달리 괄호로 시작합니다'],
+    [s => (s.match(/\d/g) || []).length, (k, x) => k ? `다른 행들은 대부분 숫자가 ${k}자리인데 이 행은 ${(x.v.match(/\d/g) || []).length}자리입니다` : '다른 행들과 달리 숫자가 들어 있습니다'],
+    [s => /[가-힣]/.test(s), k => k ? '다른 행들은 대부분 한글인데 이 행은 한글이 없습니다' : '다른 행들과 달리 한글이 들어 있습니다'],
+    [s => /[A-Za-z]/.test(s), k => k ? '다른 행들은 대부분 영문이 있는데 이 행은 없습니다' : '다른 행들과 달리 영문이 들어 있습니다'],
+  ];
+  if (med <= 24) checks.push([shapeSig, (k, x, g) => { const ex = g.get(k)[0].v; return `다른 행들과 형식이 다릅니다 (대부분 "${ex}" 같은 형식)`; }]);
+  for (const [fn, msg] of checks) {
+    const m = majority(fn); if (!m) continue;
+    m.groups.forEach((list, k) => { if (k === m.k) return; list.forEach(x => { if (!flagged.has(x.ri)) { flagged.add(x.ri); out.push({ ri: x.ri, msg: msg(m.k, x, m.groups), val: x.v }); } }); });
+  }
+  if (med >= 6) items.forEach(x => { if (!flagged.has(x.ri) && x.v.length < med * 0.4) { flagged.add(x.ri); out.push({ ri: x.ri, msg: `다른 값들보다 매우 짧습니다 (보통 ${med}자, 잘림 의심)`, val: x.v }); } });
+  const atMax = items.filter(x => x.v.length === maxL);
+  if (maxL >= 15 && atMax.length >= 3 && med < maxL * 0.8) atMax.forEach(x => { if (!flagged.has(x.ri)) { flagged.add(x.ri); out.push({ ri: x.ri, msg: `여러 값이 똑같이 ${maxL}자에서 끝납니다 (원본에서 잘렸을 가능성)`, val: x.v }); } });
+  return out;
+}
+function audit() {
+  const st = S.tpl.settings;
+  const key = [S.dataVer, S.tpl.body, JSON.stringify(S.tpl.vars), st.toCol, st.ccCol].join('\u0001');
+  if (auditMemo.key === key) return auditMemo.res;
+  const issues = [], globals = [];
+  const add = (ri, varName, sev, msg, val) => issues.push({ ri, varName, sev, msg, val: String(val ?? '') });
+  if (hasData()) {
+    const R = S.data.rows.length; const vars = S.tpl.vars.filter(v => varCount(v.id) > 0);
+    vars.forEach(v => v.srcs.forEach((s, i) => {
+      const lbl = v.srcs.length > 1 ? `값${i + 1}: ` : '';
+      if (!s.useFixed && !s.col) globals.push({ varName: v.name, msg: `${lbl}데이터 열이 선택되지 않았습니다` });
+      else if (!s.useFixed && !S.data.headers.includes(s.col)) globals.push({ varName: v.name, msg: `${lbl}열 "${s.col}"이(가) 지금 데이터에 없습니다` });
+    }));
+    if (!st.toCol) globals.push({ varName: '받는 사람', msg: '③ 출력 탭에서 받는 사람(To) 열을 고르면 이메일도 검수합니다' });
+    for (const v of vars) {
+      const res = []; for (let ri = 0; ri < R; ri++) res.push(computeValEx(v, ri));
+      let fxRows = 0, fxChanged = 0;
+      res.forEach(r => { if (r.tr && r.tr.fxOn && r.tr.fxOut !== null && r.tr.input !== '') { fxRows++; if (r.tr.fxOut !== r.tr.input) fxChanged++; } });
+      const fxMostlyChanges = fxRows >= 3 && fxChanged / fxRows >= 0.5;
+      res.forEach((r, ri) => {
+        const tr = r.tr || { parts: [] };
+        v.srcs.forEach((s, i) => {
+          if (s.useFixed || !s.col || !S.data.headers.includes(s.col)) return;
+          const p = tr.parts[i] ?? ''; const lbl = v.srcs.length > 1 ? ` (값${i + 1}: ${s.col})` : '';
+          if (p !== '' && PLACEHOLDER_RE.test(p)) add(ri, v.name, 'warn', `사실상 빈 값이 들어 있습니다${lbl}`, p);
+          else if (p === '' && v.srcs.length > 1 && r.val !== '') add(ri, v.name, 'warn', `합치는 데이터 중 일부가 비어 있습니다${lbl}`, '');
+        });
+        if (r.err) { add(ri, v.name, 'error', `수식 오류 — ${r.err.message}`, tr.input); return; }
+        if (r.val !== '' && PLACEHOLDER_RE.test(r.val)) { if (!tr.parts.some(p => PLACEHOLDER_RE.test(p))) add(ri, v.name, 'warn', '결과가 사실상 빈 값입니다', r.val); return; }
+        if (r.val === '') {
+          if (!v.removeEmpty) {
+            if (tr.fxOn && tr.input !== '') add(ri, v.name, 'error', '수식 결과가 비어 있습니다', tr.input);
+            else add(ri, v.name, 'error', v.kind === 'link' ? '링크 주소가 비어 있습니다' : '값이 비어 있습니다', '');
+          }
+          return;
+        }
+        if (tr.dateFail) add(ri, v.name, 'error', '날짜로 읽을 수 없어 형식을 바꾸지 못했습니다', r.val);
+        if (tr.mapMiss) add(ri, v.name, 'warn', `변환표에 없는 값입니다 → ${v.map.fallback === 'default' ? '기본값이 들어감' : v.map.fallback === 'empty' ? '빈 값 처리' : '원래 값이 그대로 들어감'}`, tr.mapKey);
+        if (fxMostlyChanges && tr.fxOut !== null && tr.input !== '' && tr.fxOut === tr.input) add(ri, v.name, 'warn', '다른 행과 달리 수식이 아무것도 바꾸지 못했습니다', tr.input);
+        if (v.kind === 'link' && !/^(https?:|mailto:)/i.test(safeHref(r.val))) add(ri, v.name, 'warn', '링크 주소 형식(https://…)이 아닙니다', r.val);
+        if (unbalanced(r.val)) add(ri, v.name, 'warn', '괄호·따옴표의 짝이 맞지 않습니다 (잘림 의심)', r.val);
+        else if (/[-–,&/(+:;]$/.test(r.val)) add(ri, v.name, 'warn', '끝이 끊긴 모양입니다 (잘림 의심)', r.val);
+      });
+      if (v.kind === 'text') outliers(res.map(r => (r.err || PLACEHOLDER_RE.test(r.val) ? null : r.val))).forEach(o => add(o.ri, v.name, 'warn', o.msg, o.val));
+    }
+    if (st.toCol && S.data.headers.includes(st.toCol)) {
+      const seen = new Map();
+      for (let ri = 0; ri < R; ri++) {
+        const raw = cellOf(ri, st.toCol).txt.trim();
+        if (!raw) { add(ri, '받는 사람', 'error', '이메일이 비어 있습니다', ''); continue; }
+        const list = raw.split(/[;,\s]+/).filter(Boolean); const bad = list.filter(x => !EMAIL_RE.test(x));
+        if (bad.length) add(ri, '받는 사람', 'error', '이메일 형식이 아닙니다', bad.join(', '));
+        list.filter(x => EMAIL_RE.test(x)).forEach(e => { const k = e.toLowerCase(); if (!seen.has(k)) seen.set(k, []); seen.get(k).push(ri); });
+      }
+      seen.forEach((rows, e) => { if (rows.length > 1) rows.forEach(ri => add(ri, '받는 사람', 'warn', `같은 이메일이 ${rows.length}개 행에 있습니다 (#${rows.map(x => x + 1).join(', #')})`, e)); });
+    }
+  }
+  const byRow = new Map(); issues.forEach(i => { if (!byRow.has(i.ri)) byRow.set(i.ri, []); byRow.get(i.ri).push(i); });
+  auditMemo = { key, res: { issues, globals, byRow } };
+  return auditMemo.res;
+}
+function rowAudit(ri) {
+  const list = audit().byRow.get(ri) || [];
+  return { list, e: list.filter(i => i.sev === 'error').length, w: list.filter(i => i.sev === 'warn').length, ok: S.ok.has(ri) };
+}
+function confirmRowIssues(ri, what) {
+  const a = rowAudit(ri); if (!a.e || a.ok) return true;
+  const lines = a.list.filter(i => i.sev === 'error').slice(0, 6).map(i => `- ${i.varName}: ${i.msg}`).join('\n');
+  return confirm(`${rowLabel(ri)}에 오류 ${a.e}건이 있습니다.\n${lines}\n\n그래도 ${what}할까요?\n(④ 검수 탭에서 '확인함'으로 표시하면 다시 묻지 않습니다)`);
+}
+
+/* ---------- inline CSS for Outlook ---------- */
+const INH = ['font-family', 'font-size', 'font-weight', 'font-style', 'color', 'line-height', 'text-align'];
+const BOX_TAGS = /^(P|DIV|H[1-6]|UL|OL|LI|TABLE|BLOCKQUOTE|PRE)$/;
+function inlineStyles(d) {
+  const win = d.defaultView; const all = $$('*', d.body); const snap = new Map();
+  const props = [...INH, 'margin-top', 'margin-bottom', 'margin-left', 'margin-right', 'background-color', 'text-decoration-line'];
+  all.forEach(el => { const c = win.getComputedStyle(el); const o = {}; props.forEach(p => o[p] = c.getPropertyValue(p)); snap.set(el, o); });
+  for (const el of all) {
+    const tag = el.tagName; if (tag === 'BR' || tag === 'IMG' || tag.includes(':') || tag === 'STYLE') continue;
+    const o = snap.get(el); const par = el.parentElement === d.body ? null : snap.get(el.parentElement); const add = [];
+    for (const p of INH) {
+      if (el.style.getPropertyValue(p)) continue;
+      if (p === 'line-height' && o[p] === 'normal') continue;
+      if (!par && ((p === 'font-weight' && o[p] === '400') || (p === 'font-style' && o[p] === 'normal') || (p === 'text-align' && o[p] === 'start'))) continue;
+      if (!par || par[p] !== o[p]) add.push(`${p}:${o[p]}`);
+    }
+    if (BOX_TAGS.test(tag)) ['margin-top', 'margin-bottom', 'margin-left', 'margin-right'].forEach(p => { if (!el.style.getPropertyValue(p)) add.push(`${p}:${o[p]}`); });
+    const bg = o['background-color']; if (bg && bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent' && !el.style.backgroundColor && !el.getAttribute('bgcolor')) add.push(`background-color:${bg}`);
+    const td = o['text-decoration-line']; if (td && td !== 'none' && !el.style.textDecoration && tag !== 'A') add.push(`text-decoration:${td}`);
+    if (add.length) { const base = (el.getAttribute('style') || '').trim().replace(/;$/, ''); el.setAttribute('style', base ? base + ';' + add.join(';') : add.join(';')); }
+  }
+}
+function buildOutput(ri) {
+  if (S.view === 'edit') syncFromEditor();
+  let body = renderBody(ri);
+  if (S.tpl.bodyStyle) body = `<div style="${esc(S.tpl.bodyStyle)}">${body}</div>`;
+  const d = writeFrame(wkFrame, frameHtml(S.tpl.head, '', body));
+  inlineStyles(d);
+  return { html: d.body.innerHTML, text: d.body.innerText };
+}
+
+/* ---------- clipboard ---------- */
+function copyRich(html, text) {
+  let ok = false;
+  const h = e => { e.clipboardData.setData('text/html', html); e.clipboardData.setData('text/plain', text); e.preventDefault(); ok = true; };
+  const ta = document.createElement('textarea'); ta.value = text || ' '; ta.style.cssText = 'position:fixed;left:-9999px;top:0';
+  document.body.append(ta); ta.select();
+  document.addEventListener('copy', h);
+  try { document.execCommand('copy'); } catch (e) {}
+  document.removeEventListener('copy', h); ta.remove();
+  if (!ok && navigator.clipboard && window.ClipboardItem) {
+    navigator.clipboard.write([new ClipboardItem({ 'text/html': new Blob([html], { type: 'text/html' }), 'text/plain': new Blob([text], { type: 'text/plain' }) })])
+      .catch(() => toast('복사하지 못했습니다. 브라우저 권한을 확인해 주세요', true));
+    return true;
+  }
+  return ok;
+}
+function copyPlain(text) {
+  const ta = document.createElement('textarea'); ta.value = text; ta.style.cssText = 'position:fixed;left:-9999px;top:0';
+  document.body.append(ta); ta.select(); let ok = false; try { ok = document.execCommand('copy'); } catch (e) {} ta.remove();
+  if (!ok && navigator.clipboard) { navigator.clipboard.writeText(text); ok = true; }
+  return ok;
+}
+function copyRow(ri) {
+  if (hasData() && !confirmRowIssues(ri, '복사')) return false;
+  const out = buildOutput(ri);
+  if (copyRich(out.html, out.text)) {
+    if (hasData()) { S.done[ri] = 'copy'; saveDataLater(); renderDataTable(); }
+    const a = hasData() ? rowAudit(ri) : { w: 0, e: 0, ok: false };
+    const note = a.ok ? '' : a.e ? ` (오류 ${a.e}건 포함)` : a.w ? ` (주의 ${a.w}건 — ④ 검수에서 확인)` : '';
+    toast((hasData() ? `${rowLabel(ri)} 본문 복사됨 — Outlook 메일 본문에 Ctrl+V` : '본문 복사됨 — Outlook 메일 본문에 Ctrl+V') + note, !!(note && a.e));
+    return true;
+  }
+  toast('복사하지 못했습니다. 창을 한 번 클릭한 뒤 다시 눌러 주세요', true);
+  return false;
+}
+function copySubject(ri) {
+  const s = renderSubject(ri); if (!s) { toast('③ 출력 탭에서 제목을 먼저 입력하세요', true); setTab('output'); return; }
+  if (copyPlain(s)) toast('제목 복사됨: ' + s);
+}
+
+/* ---------- .eml & zip ---------- */
+function encHeader(s) {
+  if (/^[\x20-\x7e]*$/.test(s)) return s;
+  const chars = [...s]; const parts = [];
+  for (let i = 0; i < chars.length; i += 16) parts.push('=?UTF-8?B?' + b64utf8(chars.slice(i, i + 16).join('')) + '?=');
+  return parts.join('\r\n ');
+}
+const addrList = s => String(s || '').split(/[;,\s]+/).filter(x => x.includes('@')).join(', ');
+const wrap76 = s => s.replace(/.{1,76}/g, '$&\r\n');
+function buildEml(ri) {
+  const out = buildOutput(ri); const parts = []; let n = 0;
+  const body = out.html.replace(/(<img\b[^>]*?\bsrc\s*=\s*)(["'])data:([\w.+\/-]+);base64,([^"']+)\2/gi, (m, pre, q, mime, b64) => {
+    n++; const cid = `img${n}.${ri}.${Date.now().toString(36)}@mailform`;
+    const ext = (mime.split('/')[1] || 'png').replace('jpeg', 'jpg').replace(/\+.*/, '');
+    parts.push({ cid, mime, b64: b64.replace(/\s+/g, ''), name: `image${n}.${ext}` });
+    return `${pre}${q}cid:${cid}${q}`;
+  });
+  const h = String(S.tpl.head || '').replace(/<\/style/gi, '<\\/style');
+  const html = `<!DOCTYPE html><html><head><meta http-equiv="Content-Type" content="text/html; charset=utf-8"><style>${h}</style></head><body>${body}</body></html>`;
+  const st = S.tpl.settings; const lines = ['X-Unsent: 1'];
+  if (hasData()) {
+    const to = st.toCol ? addrList(cellOf(ri, st.toCol).txt) : ''; if (to) lines.push('To: ' + to);
+    const cc = st.ccCol ? addrList(cellOf(ri, st.ccCol).txt) : ''; if (cc) lines.push('Cc: ' + cc);
+  }
+  lines.push('Subject: ' + encHeader(renderSubject(ri)), 'MIME-Version: 1.0');
+  const htmlPart = 'Content-Type: text/html; charset="utf-8"\r\nContent-Transfer-Encoding: base64\r\n\r\n' + wrap76(b64utf8(html));
+  if (!parts.length) return lines.join('\r\n') + '\r\n' + htmlPart;
+  const bd = '----=_mailform_' + Math.random().toString(36).slice(2);
+  let s = lines.join('\r\n') + `\r\nContent-Type: multipart/related; boundary="${bd}"; type="text/html"\r\n\r\nThis is a multi-part message in MIME format.\r\n\r\n--${bd}\r\n` + htmlPart;
+  for (const p of parts) s += `\r\n--${bd}\r\nContent-Type: ${p.mime}; name="${p.name}"\r\nContent-Transfer-Encoding: base64\r\nContent-ID: <${p.cid}>\r\nContent-Disposition: inline; filename="${p.name}"\r\n\r\n` + wrap76(p.b64);
+  return s + `\r\n--${bd}--\r\n`;
+}
+function emlName(ri) {
+  const lbl = hasData() ? rowLabel(ri).replace(/^#\d+\s*/, '') : (S.tpl.name || 'mail');
+  return `${String(ri + 1).padStart(3, '0')}_${safeName(lbl) || 'mail'}.eml`;
+}
+const CRC_T = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+function crc32(u8) { let c = 0xFFFFFFFF; for (let i = 0; i < u8.length; i++) c = CRC_T[(c ^ u8[i]) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
+function makeZip(files) {
+  const enc = new TextEncoder(), chunks = [], central = []; let offset = 0;
+  const now = new Date();
+  const dt = (now.getHours() << 11) | (now.getMinutes() << 5) | (now.getSeconds() >> 1);
+  const dd = ((now.getFullYear() - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate();
+  for (const f of files) {
+    const nm = enc.encode(f.name), crc = crc32(f.data), len = f.data.length;
+    const lh = new DataView(new ArrayBuffer(30));
+    lh.setUint32(0, 0x04034b50, true); lh.setUint16(4, 20, true); lh.setUint16(6, 0x0800, true); lh.setUint16(8, 0, true);
+    lh.setUint16(10, dt, true); lh.setUint16(12, dd, true); lh.setUint32(14, crc, true); lh.setUint32(18, len, true); lh.setUint32(22, len, true);
+    lh.setUint16(26, nm.length, true); lh.setUint16(28, 0, true);
+    chunks.push(new Uint8Array(lh.buffer), nm, f.data);
+    const ch = new DataView(new ArrayBuffer(46));
+    ch.setUint32(0, 0x02014b50, true); ch.setUint16(4, 20, true); ch.setUint16(6, 20, true); ch.setUint16(8, 0x0800, true); ch.setUint16(10, 0, true);
+    ch.setUint16(12, dt, true); ch.setUint16(14, dd, true); ch.setUint32(16, crc, true); ch.setUint32(20, len, true); ch.setUint32(24, len, true);
+    ch.setUint16(28, nm.length, true); ch.setUint32(42, offset, true);
+    central.push(new Uint8Array(ch.buffer), nm);
+    offset += 30 + nm.length + len;
+  }
+  const cdSize = central.reduce((a, c) => a + c.length, 0);
+  const end = new DataView(new ArrayBuffer(22));
+  end.setUint32(0, 0x06054b50, true); end.setUint16(8, files.length, true); end.setUint16(10, files.length, true);
+  end.setUint32(12, cdSize, true); end.setUint32(16, offset, true);
+  return new Blob([...chunks, ...central, new Uint8Array(end.buffer)], { type: 'application/zip' });
+}
+function saveEml(ri) {
+  if (hasData() && !confirmRowIssues(ri, '.eml로 저장')) return;
+  download(new Blob([buildEml(ri)], { type: 'message/rfc822' }), emlName(ri));
+  if (hasData()) { S.done[ri] = S.done[ri] || 'eml'; saveDataLater(); renderDataTable(); }
+}
+function saveZip() {
+  if (!hasData()) { toast('먼저 ② 데이터 탭에서 데이터를 불러오세요', true); setTab('data'); return; }
+  let list = [...S.sel].sort((a, b) => a - b); if (!list.length) { toast('② 데이터 탭에서 대상 행을 체크하세요', true); return; }
+  if (S.view === 'edit') syncFromEditor();
+  const bad = list.filter(ri => { const a = rowAudit(ri); return a.e && !a.ok; });
+  if (bad.length) {
+    if (!confirm(`선택한 ${list.length}건 중 ${bad.length}건에 오류가 있습니다 (#${bad.slice(0, 15).map(x => x + 1).join(', #')}${bad.length > 15 ? ' …' : ''}).\n\n확인 = 오류 있는 행은 빼고 저장\n취소 = 저장하지 않고 돌아가기 (④ 검수에서 확인)`)) { setTab('audit'); return; }
+    list = list.filter(ri => !bad.includes(ri)); if (!list.length) { toast('저장할 행이 없습니다', true); return; }
+  }
+  const enc = new TextEncoder(); const used = new Set();
+  const files = list.map(ri => { let nm = emlName(ri); while (used.has(nm)) nm = nm.replace(/\.eml$/, '_.eml'); used.add(nm); return { name: nm, data: enc.encode(buildEml(ri)) }; });
+  download(makeZip(files), `${safeName(S.tpl.name) || '메일'}_${today()}.zip`);
+  list.forEach(ri => { if (!S.done[ri]) S.done[ri] = 'eml'; }); saveDataLater(); renderDataTable();
+  const noTo = S.tpl.settings.toCol ? list.filter(ri => !addrList(cellOf(ri, S.tpl.settings.toCol).txt)).length : list.length;
+  toast(`.eml ${files.length}건을 ZIP으로 저장했습니다` + (noTo ? ` (받는 사람 없음 ${noTo}건)` : ''), noTo > 0);
+}
+
+/* =========================================================
+   Data loading
+   ========================================================= */
+const SYN = {
+  name: ['company', 'companyname', '회사', '회사명', '업체', '업체명', '기업', '기업명', '상호', '참가사', '참가업체'],
+  location: ['branch', 'branchname', '지점', '지점명', '장소', 'venue', 'site', '신청지점'],
+  code: ['코드', '입장코드', 'entrycode', '참가코드'],
+  email: ['이메일', '메일', 'mail', 'emailaddress', 'to', '받는사람', '수신자', '이메일주소'],
+  language: ['lang', '언어', '사용언어'],
+};
+function findCol(name) {
+  const H = S.data.headers; const n = N(name);
+  let i = H.findIndex(h => N(h) === n); if (i >= 0) return H[i];
+  for (const [k, list] of Object.entries(SYN)) {
+    const group = [k, ...list];
+    if (group.includes(n)) { i = H.findIndex(h => group.includes(N(h))); if (i >= 0) return H[i]; }
+  }
+  // partial: variable name contains a column name (e.g. "전화번호 뒤 4자리" → "전화번호")
+  const part = H.filter(h => N(h).length >= 2 && n.includes(N(h))).sort((a, b) => N(b).length - N(a).length);
+  return part[0] || '';
+}
+function autoMap() {
+  let changed = 0;
+  S.tpl.vars.forEach(v => { const s = v.srcs[0]; if (v.srcs.length === 1 && !s.useFixed && (!s.col || !S.data.headers.includes(s.col))) { const c = findCol(v.name); if (c && c !== s.col) { s.col = c; changed++; } } });
+  const st = S.tpl.settings;
+  if (!st.toCol || !S.data.headers.includes(st.toCol)) { const c = findCol('email'); if (c) { st.toCol = c; changed++; } }
+  if (changed && S.tpl.vars.length) markDirty();
+  return changed;
+}
+function parseDelimited(text, delim) {
+  text = text.replace(/^﻿/, '');
+  if (!delim) {
+    const first = text.split(/\r?\n/, 1)[0];
+    const c = { '\t': first.split('\t').length, ',': first.split(',').length, ';': first.split(';').length };
+    delim = Object.entries(c).sort((a, b) => b[1] - a[1])[0][0];
+  }
+  const rows = []; let row = [], f = '', q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) { if (c === '"') { if (text[i + 1] === '"') { f += '"'; i++; } else q = false; } else f += c; }
+    else if (c === '"' && f === '') q = true;
+    else if (c === delim) { row.push(f); f = ''; }
+    else if (c === '\n' || c === '\r') { if (c === '\r' && text[i + 1] === '\n') i++; row.push(f); rows.push(row); row = []; f = ''; }
+    else f += c;
+  }
+  if (f !== '' || row.length) { row.push(f); rows.push(row); }
+  return rows;
+}
+function setTable(arr, rawArr, name) {
+  arr = arr.filter(r => r && r.some(c => String(c ?? '').trim() !== ''));
+  if (rawArr) rawArr = rawArr.filter(r => r && r.some(c => String(c ?? '').trim() !== ''));
+  if (arr.length < 1) { toast('데이터가 비어 있습니다', true); return; }
+  const width = Math.max(...arr.map(r => r.length));
+  const seen = {}; const headers = [];
+  for (let i = 0; i < width; i++) {
+    let h = String(arr[0][i] ?? '').trim() || `열${i + 1}`;
+    if (seen[h]) { let k = 2; while (seen[`${h}_${k}`]) k++; h = `${h}_${k}`; } seen[h] = 1; headers.push(h);
+  }
+  const fix = r => headers.map((_, i) => (r && r[i] !== undefined && r[i] !== null) ? r[i] : '');
+  S.data = { headers, rows: arr.slice(1).map(r => fix(r).map(c => String(c))), raws: (rawArr || arr).slice(1).map(fix), name };
+  S.done = {}; S.ok = new Set(); S.dataVer++; S.sel = new Set(S.data.rows.map((_, i) => i)); S.cur = 0;
+  const changed = autoMap();
+  renderAllData(); renderVars(); renderOutputSettings(); saveDataLater();
+  toast(`${S.data.rows.length}행을 불러왔습니다` + (changed ? ` · 변수 ${changed}개를 열에 자동 연결` : ''));
+}
+function flatten(o, pre = '', out = {}) {
+  for (const [k, v] of Object.entries(o || {})) {
+    const key = pre ? pre + '.' + k : k;
+    if (v && typeof v === 'object' && !Array.isArray(v)) flatten(v, key, out);
+    else out[key] = Array.isArray(v) ? v.join(', ') : (v ?? '');
+  }
+  return out;
+}
+function ensureXLSX() {
+  if (window.XLSX) return Promise.resolve();
+  return new Promise((res, rej) => {
+    const s = document.createElement('script'); s.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+    s.onload = () => res(); s.onerror = () => rej(new Error('Excel 읽기 도구를 내려받지 못했습니다(인터넷 연결 필요). 엑셀에서 표를 복사해 붙여넣거나 CSV로 저장해 주세요.'));
+    document.head.append(s);
+  });
+}
+function loadSheet(name) {
+  const ws = S.wb.Sheets[name];
+  const txt = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '', blankrows: false, dateNF: 'yyyy-mm-dd' });
+  const raw = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: '', blankrows: false });
+  setTable(txt, raw, `${S.data.fileName || ''} · ${name}`);
+}
+async function loadDataFile(file) {
+  const ext = file.name.split('.').pop().toLowerCase();
+  try {
+    const buf = await file.arrayBuffer();
+    $('#sheetSel').hidden = true;
+    if (['xlsx', 'xls', 'xlsm'].includes(ext)) {
+      toast('Excel 파일을 읽는 중…'); await ensureXLSX();
+      S.wb = XLSX.read(buf, { type: 'array' }); S.data.fileName = file.name;
+      const sel = $('#sheetSel'); sel.innerHTML = S.wb.SheetNames.map(n => `<option>${esc(n)}</option>`).join('');
+      sel.hidden = S.wb.SheetNames.length < 2;
+      loadSheet(S.wb.SheetNames[0]);
+    } else if (ext === 'json') {
+      let j = JSON.parse(decodeText(buf));
+      if (!Array.isArray(j)) { const a = Object.values(j).find(Array.isArray); j = a || [j]; }
+      const objs = j.map(x => typeof x === 'object' && x !== null ? flatten(x) : { value: x });
+      const headers = []; objs.forEach(o => Object.keys(o).forEach(k => { if (!headers.includes(k)) headers.push(k); }));
+      const arr = [headers, ...objs.map(o => headers.map(h => o[h] ?? ''))];
+      setTable(arr, null, file.name);
+    } else {
+      setTable(parseDelimited(decodeText(buf), ext === 'tsv' ? '\t' : null), null, file.name);
+    }
+  } catch (e) { console.error(e); toast(e.message || '데이터를 읽지 못했습니다', true); }
+}
+const saveDataLater = debounce(() => {
+  DB.put('kv', { k: 'lastData', headers: S.data.headers, rows: S.data.rows, raws: S.data.raws, name: S.data.name, done: S.done, sel: [...S.sel], ok: [...S.ok] }).catch(() => {});
+}, 500);
+
+/* =========================================================
+   UI rendering
+   ========================================================= */
+function varCount(id) { const m = (S.tpl.body || '').match(new RegExp(`data-mv(?:-href)?="${id}"`, 'g')); return m ? m.length : 0; }
+function colOptions(selected, withFixed) {
+  const H = S.data.headers;
+  let o = withFixed ? `<option value="__fixed"${selected === '__fixed' ? ' selected' : ''}>고정값 직접 입력</option>` : '';
+  o += `<option value=""${!selected ? ' selected' : ''}>${H.length ? '— 데이터 열 선택 —' : '— (데이터를 불러오면 선택) —'}</option>`;
+  H.forEach(h => o += `<option value="${esc(h)}"${h === selected ? ' selected' : ''}>${esc(h)}</option>`);
+  if (selected && selected !== '__fixed' && !H.includes(selected)) o += `<option value="${esc(selected)}" selected>${esc(selected)} (현재 데이터에 없음)</option>`;
+  return o;
+}
+function varCardHtml(v) {
+  const cnt = varCount(v.id); const st = v.style; const styled = !!styleCss(st);
+  const fmtRow = `
+    <div class="vrow"><label>표시</label>
+      <select data-f="fmt"><option value="text"${v.fmt === 'text' ? ' selected' : ''}>데이터 그대로</option>${v.kind === 'text' ? `<option value="date"${v.fmt === 'date' ? ' selected' : ''}>날짜 형식으로 바꾸기</option>` : ''}<option value="formula"${v.fmt === 'formula' ? ' selected' : ''}>직접 수식 입력</option></select>
+    </div>
+    ${v.fmt === 'formula' ? `<div class="vrow"><label>수식</label><textarea data-f="formula" rows="2" spellcheck="false" placeholder="예: RIGHT(값, 4)   ·   값 = 고른 열의 내용, [열 이름] = 다른 열">${esc(v.formula)}</textarea></div>
+    <div class="vrow"><label></label><select data-f="fxPreset"><option value="">자주 쓰는 가공 골라 넣기…</option>${FX_PRESETS.map((p, i) => `<option value="${i}">${esc(p[0])}</option>`).join('')}</select></div>
+    <div class="fxmsg" data-fxmsg>${fxMsgHtml(v)}</div>
+    <details data-d="fxhelp"><summary>수식 쓰는 법 · 함수 목록</summary>${FX_HELP}</details>` : ''}
+    ${v.kind === 'text' && v.fmt === 'date' ? `<div class="vrow"><label></label>
+      <select data-f="datePreset">${DATE_PRESETS.map(p => `<option${p === v.dateFmt ? ' selected' : ''}>${esc(p)}</option>`).join('')}<option value="__custom"${DATE_PRESETS.includes(v.dateFmt) ? '' : ' selected'}>직접 입력…</option></select>
+      <input data-f="dateFmt" value="${esc(v.dateFmt)}" title="YYYY 년 · MM/M 월 · DD/D 일 · MMMM 월 이름 · ddd/dddd 요일 · aaa 한글 요일 · [글자] 그대로" ${DATE_PRESETS.includes(v.dateFmt) ? 'hidden' : ''}>
+    </div>` : ''}`;
+  const map = v.map;
+  const mapRows = map.rows.map((r, i) => `<tr><td><input data-f="mk" data-i="${i}" value="${esc(r.k)}" placeholder="데이터 값 (예: EN)"></td><td><input data-f="mv" data-i="${i}" value="${esc(r.v)}" placeholder="${v.kind === 'link' ? 'https://…' : '바꿀 값'}"></td><td><button class="icon" data-act="mapdel" data-i="${i}" title="행 삭제">✕</button></td></tr>`).join('');
+  return `<div class="var" data-id="${v.id}">
+    <div class="var-head">
+      <span class="kind ${v.kind}">${v.kind === 'link' ? '링크' : '텍스트'}</span>
+      <input class="var-name" data-f="name" value="${esc(v.name)}" title="변수 이름">
+      <span class="count${cnt ? '' : ' warn'}">${cnt ? cnt + '곳' : '양식에 없음'}</span>
+      <button class="icon" data-act="locate" title="양식에서 위치 보기">◎</button>
+      <button class="icon danger" data-act="del" title="변수 삭제">✕</button>
+    </div>
+    ${srcRowsHtml(v)}
+    ${fmtRow}
+    <div class="vrow"><label></label><label class="chk"><input type="checkbox" data-f="removeEmpty"${v.removeEmpty ? ' checked' : ''}> 값이 비어 있으면 그 줄을 통째로 삭제</label></div>
+    <details data-d="map"${map.on || map.rows.length ? ' open' : ''}><summary>값 변환표 ${map.on ? '<b>사용 중</b>' : ''} — 예: 언어 EN → 영문 가이드 링크</summary>
+      <label class="chk" style="margin-top:6px"><input type="checkbox" data-f="mapOn"${map.on ? ' checked' : ''}> 데이터 값을 아래 표대로 바꿔 넣기</label>
+      <table class="maptbl">${mapRows}</table>
+      <div class="btn-row" style="margin-top:4px"><button data-act="mapadd">+ 행 추가</button><button data-act="mappaste" title="엑셀에서 두 열(원래 값, 바꿀 값)을 복사한 뒤 누르세요">엑셀 두 열 붙여넣기</button></div>
+      <div class="vrow"><label style="width:auto">표에 없는 값은</label>
+        <select data-f="mapFb"><option value="keep"${map.fallback === 'keep' ? ' selected' : ''}>원래 값 그대로</option><option value="empty"${map.fallback === 'empty' ? ' selected' : ''}>빈 값으로</option><option value="default"${map.fallback === 'default' ? ' selected' : ''}>기본값 사용</option></select>
+        ${map.fallback === 'default' ? `<input data-f="mapDef" value="${esc(map.def)}" placeholder="기본값">` : ''}
+      </div>
+    </details>
+    ${v.kind === 'text' ? `<details data-d="style"><summary>서식 ${styled ? '<b>따로 지정됨</b>' : '— 원문 서식 따름'}</summary>
+      <div class="stylegrid">
+        ${[['b', '굵게'], ['i', '기울임'], ['u', '밑줄']].map(([k, l]) => `<label>${l}<select data-f="st_${k}"><option value="">원문 따름</option><option value="on"${st[k] === 'on' ? ' selected' : ''}>켜기</option><option value="off"${st[k] === 'off' ? ' selected' : ''}>끄기</option></select></label>`).join('')}
+        <label>글자색<span style="display:flex;gap:4px;align-items:center"><input type="checkbox" data-f="st_colorOn"${st.color ? ' checked' : ''} title="글자색 지정"><input type="color" data-f="st_color" value="${esc(st.color || '#c00000')}"></span></label>
+        <label>크기(pt)<input type="number" step="0.5" min="6" max="72" data-f="st_size" value="${esc(st.size)}" placeholder="원문"></label>
+      </div></details>` : ''}
+    <div class="cur">${curValHtml(v)}</div>
+  </div>`;
+}
+function curValHtml(v) {
+  if (!hasData() && needsData(v)) return '데이터를 불러오면 여기에 현재 행 값이 보입니다';
+  const { val, err } = computeValEx(v, S.cur);
+  if (err) return `${hasData() ? esc(rowLabel(S.cur)) : '값'} → <span class="empty-val">(수식 오류)</span>`;
+  return `${hasData() ? esc(rowLabel(S.cur)) : '값'} → ${val === '' ? `<span class="empty-val">(비어 있음${v.removeEmpty ? ' · 줄 삭제' : ''})</span>` : `<b>${esc(val)}</b>`}`;
+}
+const JOINERS = [[' ', '공백 ( )'], [', ', '쉼표 (, )'], [' / ', '슬래시 ( / )'], [' - ', '하이픈 ( - )'], ['\\n', '줄바꿈'], ['', '붙여 쓰기 (구분 없음)']];
+function srcRowsHtml(v) {
+  const multi = v.srcs.length > 1;
+  let h = v.srcs.map((s, i) => `<div class="vrow"><label>${multi ? '값' + (i + 1) : '값'}</label>
+      <select data-f="src" data-si="${i}">${colOptions(s.useFixed ? '__fixed' : s.col, true)}</select>
+      ${s.useFixed ? `<input data-f="fixed" data-si="${i}" value="${esc(s.fixed)}" placeholder="${v.kind === 'link' ? 'https://…' : '모든 메일에 같은 값 (예: 담당자 이름)'}">` : ''}
+      ${multi ? `<button class="icon" data-act="srcdel" data-si="${i}" title="이 데이터 빼기">✕</button>` : ''}
+    </div>`).join('');
+  h += `<div class="vrow"><label></label><button data-act="srcadd" title="다른 열이나 고정값을 함께 넣기">+ 데이터 추가</button></div>`;
+  if (multi) {
+    const known = JOINERS.some(j => j[0] === v.joiner);
+    h += `<div class="vrow"><label>합치기</label>
+      <select data-f="joiner">${JOINERS.map(j => `<option value="${esc(j[0])}"${j[0] === v.joiner ? ' selected' : ''}>${j[1]}</option>`).join('')}<option value="__custom"${known ? '' : ' selected'}>직접 입력…</option></select>
+      ${known ? '' : `<input data-f="joinerCustom" value="${esc(v.joiner)}" placeholder="구분 글자">`}
+    </div>
+    <p class="hint" style="margin-left:44px">빈 값은 건너뛰고 합칩니다. '직접 수식 입력'에서는 <code>값1</code>, <code>값2</code>…로 하나씩 쓸 수 있습니다.</p>`;
+  }
+  return h;
+}
+function fxMsgHtml(v) {
+  if (!String(v.formula || '').trim()) return '<span class="muted">수식을 입력하거나 아래에서 골라 넣으세요. 비워 두면 데이터 그대로 들어갑니다.</span>';
+  try { fxCompile(v.formula); } catch (e) { return `<span class="bad">⚠ ${esc(e.code)} ${esc(e.message)}</span>`; }
+  if (!hasData() && needsData(v)) return '<span class="ok">✓ 수식 문법 정상 — 데이터를 불러오면 결과가 보입니다</span>';
+  const r = computeValEx(v, S.cur);
+  if (r.err) return `<span class="bad">⚠ ${esc(rowLabel(S.cur))}: ${esc(r.err.code)} ${esc(r.err.message)}</span>`;
+  let errs = 0; if (hasData()) S.data.rows.forEach((_, i) => { if (computeValEx(v, i).err) errs++; });
+  return `<span class="ok">✓ 정상</span>${errs ? ` <span class="bad">· 전체 ${S.data.rows.length}행 중 ${errs}행 오류</span>` : ''}`;
+}
+function renderVars() {
+  const box = $('#varList'); const vars = S.tpl.vars;
+  $('#varCount').textContent = vars.length;
+  const openMap = {}; $$('.var', box).forEach(c => { openMap[c.dataset.id] = $$('details', c).map(d => d.open); });
+  if (!vars.length) {
+    box.innerHTML = `<div class="empty">아직 변수가 없습니다.<br>왼쪽 양식에서 바꿀 부분을 드래그한 뒤 <b>선택 → 변수</b>,<br>또는 양식에 <b>[이름]</b>을 적고 <b>[ ] 자동 감지</b>를 누르세요.</div>`;
+    return;
+  }
+  box.innerHTML = vars.map(varCardHtml).join('');
+  $$('.var', box).forEach(c => { const o = openMap[c.dataset.id]; if (o) $$('details', c).forEach((d, i) => { if (o[i] !== undefined) d.open = o[i]; }); });
+}
+function refreshCounts() {
+  $$('#varList .var').forEach(c => { const n = varCount(c.dataset.id); const el = $('.count', c); el.textContent = n ? n + '곳' : '양식에 없음'; el.classList.toggle('warn', !n); });
+}
+function refreshCurVals() {
+  $$('#varList .var').forEach(c => {
+    const v = S.tpl.vars.find(x => x.id === c.dataset.id); if (!v) return;
+    $('.cur', c).innerHTML = curValHtml(v);
+    const m = $('[data-fxmsg]', c); if (m) m.innerHTML = fxMsgHtml(v);
+  });
+}
+function focusVarCard(id) {
+  setTab('vars'); const c = $(`#varList .var[data-id="${id}"]`); if (!c) return;
+  c.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); c.classList.add('flash'); setTimeout(() => c.classList.remove('flash'), 1200);
+}
+function renderAllData() { renderDataInfo(); renderDataTable(); renderPvRows(); renderOutputSettings(); $('#rowCount').textContent = S.data.rows.length; renderAuditBadge(); if (!$('#tab-audit').hidden) renderAudit(); }
+function renderDataInfo() {
+  const d = S.data;
+  $('#dataInfo').innerHTML = d.rows.length ? `<b>${esc(d.name || '붙여넣은 데이터')}</b> · ${d.rows.length}행 · 열 ${d.headers.length}개 — 행을 클릭하면 결과 미리보기로 이동합니다.` : '';
+  $('#dataWrap').hidden = !d.rows.length;
+}
+function renderDataTable() {
+  const d = S.data; if (!d.rows.length) { $('#dataTable').innerHTML = ''; return; }
+  const allSel = S.sel.size === d.rows.length;
+  let h = `<thead><tr><th><input type="checkbox" id="selAll"${allSel ? ' checked' : ''} title="전체 선택"></th><th>#</th><th>상태</th>${d.headers.map(x => `<th title="${esc(x)}">${esc(x)}</th>`).join('')}<th></th></tr></thead><tbody>`;
+  d.rows.forEach((r, i) => {
+    const a = rowAudit(i); const dn = S.done[i];
+    const tip = esc(a.list.map(x => `${x.varName}: ${x.msg}`).join('\n'));
+    const au = a.ok && a.list.length ? '<span class="st-copy" title="검수 확인함">확인</span>' : a.e ? `<span class="st-err" title="${tip}">✖ ${a.e}</span>` : a.w ? `<span class="st-warn" title="${tip}">⚠ ${a.w}</span>` : '';
+    const st = [dn === 'copy' ? '<span class="st-copy">✓ 복사</span>' : dn === 'eml' ? '<span class="st-eml">✉ eml</span>' : '', au].filter(Boolean).join(' ');
+    h += `<tr data-ri="${i}" class="${i === S.cur ? 'cur' : ''}"><td><input type="checkbox" data-sel="${i}"${S.sel.has(i) ? ' checked' : ''}></td><td>${i + 1}</td><td>${st}</td>${r.map(c => `<td title="${esc(c)}">${esc(c)}</td>`).join('')}<td><button class="icon" data-act="copy" title="본문 복사">복사</button></td></tr>`;
+  });
+  $('#dataTable').innerHTML = h + '</tbody>';
+  $('#batchLabel').textContent = S.sel.size ? `선택된 행 ${S.sel.size}건` : '선택된 행 없음';
+}
+function renderPvRows() {
+  const sel = $('#pvRow');
+  sel.innerHTML = hasData() ? S.data.rows.map((_, i) => `<option value="${i}"${i === S.cur ? ' selected' : ''}>${esc(rowLabel(i))}</option>`).join('') : '<option>데이터 없음 — 변수 이름으로 표시</option>';
+  sel.disabled = !hasData(); $('#pvPrev').disabled = $('#pvNext').disabled = !hasData();
+}
+function renderOutputSettings() {
+  const st = S.tpl.settings;
+  $('#toCol').innerHTML = colOptions(st.toCol, false).replace('— 데이터 열 선택 —', '— 선택 안 함 —');
+  $('#ccCol').innerHTML = colOptions(st.ccCol, false).replace('— 데이터 열 선택 —', '— 선택 안 함 —');
+  if (document.activeElement !== $('#subject')) $('#subject').value = st.subject || '';
+  updateCurInfo();
+}
+function updateCurInfo() {
+  const s = renderSubject(S.cur);
+  $('#subjectPreview').textContent = s ? '미리보기: ' + s : '';
+  $('#curLabel').textContent = hasData() ? rowLabel(S.cur) : '데이터 없음 (변수 이름이 그대로 표시됩니다)';
+  $('#batchLabel').textContent = S.sel.size ? `선택된 행 ${S.sel.size}건` : '선택된 행 없음';
+}
+function renderPreview() {
+  if (S.view !== 'preview') return;
+  if (hasData() && S.cur >= S.data.rows.length) S.cur = 0;
+  const body = renderBody(S.cur);
+  writeFrame(pvFrame, frameHtml(S.tpl.head, S.tpl.bodyStyle, body, '', '<base target="_blank">'));
+  const st = S.tpl.settings; const meta = [];
+  if (hasData() && st.toCol) meta.push(`받는 사람: <b>${esc(addrList(cellOf(S.cur, st.toCol).txt) || '(없음)')}</b>`);
+  const subj = renderSubject(S.cur); meta.push(`제목: <b>${esc(subj || '(③ 출력 탭에서 입력)')}</b>`);
+  $('#pvMeta').innerHTML = meta.join(' &nbsp;·&nbsp; ');
+  if (hasData()) {
+    const a = rowAudit(S.cur); const first = a.list.find(i => i.sev === 'error') || a.list[0];
+    $('#pvWarn').innerHTML = a.list.length && !a.ok ? `<span class="${a.e ? 'st-err' : 'st-warn'}">${a.e ? `✖ 오류 ${a.e}` : ''}${a.e && a.w ? ' · ' : ''}${a.w ? `⚠ 주의 ${a.w}` : ''}</span> — ${esc(first.varName)}: ${esc(first.msg)}` : '';
+  } else $('#pvWarn').textContent = '';
+  $('#pvRow').value = String(S.cur);
+}
+const refreshPreviewIfShown = debounce(() => { renderPreview(); refreshCurVals(); updateCurInfo(); renderAuditBadge(); if (!$('#tab-audit').hidden) renderAudit(); }, 120);
+function renderAuditBadge() {
+  const b = $('#auditCount'); if (!hasData()) { b.textContent = '–'; b.className = 'badge'; return; }
+  let e = 0, w = 0; S.data.rows.forEach((_, ri) => { const a = rowAudit(ri); if (a.ok) return; if (a.e) e++; else if (a.w) w++; });
+  b.textContent = e ? e : w ? w : '✓'; b.className = 'badge' + (e ? ' e' : ''); b.title = `오류 있는 행 ${e} · 주의만 있는 행 ${w}`;
+}
+function renderAudit() {
+  const sum = $('#auditSum'), list = $('#auditList'), gl = $('#auditGlobals');
+  renderAuditBadge();
+  if (!hasData()) { sum.innerHTML = ''; gl.innerHTML = ''; list.innerHTML = '<div class="empty">② 데이터 탭에서 데이터를 불러오면 자동으로 검수합니다.</div>'; return; }
+  const A = audit(); const R = S.data.rows.length; const filter = $('#auditFilter').value; const hideOk = $('#auditHideOk').checked;
+  let eRows = 0, wRows = 0, okRows = 0, reviewed = 0;
+  for (let ri = 0; ri < R; ri++) { const a = rowAudit(ri); if (a.ok && a.list.length) reviewed++; else if (a.e) eRows++; else if (a.w) wRows++; else okRows++; }
+  sum.innerHTML = `<div class="pill e"><b>${eRows}</b>오류 있는 행</div><div class="pill w"><b>${wRows}</b>주의만 있는 행</div><div class="pill o"><b>${okRows}</b>문제 없음</div><div class="pill"><b>${reviewed}</b>확인함</div>`;
+  gl.innerHTML = A.globals.map(g => `<div class="aglobal">⚠ <b>${esc(g.varName)}</b> — ${esc(g.msg)}</div>`).join('');
+  let h = '';
+  for (let ri = 0; ri < R; ri++) {
+    const a = rowAudit(ri); if (!a.list.length) continue; if (hideOk && a.ok) continue;
+    const items = a.list.filter(i => filter === 'all' || i.sev === filter); if (!items.length) continue;
+    h += `<div class="arow${a.ok ? ' reviewed' : ''}" data-ri="${ri}">
+      <div class="arow-head" data-act="go" title="결과 미리보기로 보기"><span class="lbl">${esc(rowLabel(ri))}</span>
+        ${a.e ? `<span class="sev error">오류 ${a.e}</span>` : ''}${a.w ? `<span class="sev warn">주의 ${a.w}</span>` : ''}
+        <button class="icon" data-act="ok">${a.ok ? '확인 취소' : '확인함'}</button></div>
+      ${items.map(i => `<div class="aitem"><span class="sev ${i.sev}">${i.sev === 'error' ? '오류' : '주의'}</span><span class="vn">${esc(i.varName)}</span><span>${esc(i.msg)}${i.val ? ` <span class="val">${esc(i.val.length > 80 ? i.val.slice(0, 80) + '…' : i.val)}</span>` : ''}</span></div>`).join('')}
+    </div>`;
+  }
+  list.innerHTML = h || `<div class="empty">${A.issues.length ? '선택한 조건에 맞는 항목이 없습니다.' : '✓ 검수에서 발견된 문제가 없습니다.'}</div>`;
+}
+function setCur(i) {
+  if (!hasData()) return;
+  S.cur = Math.max(0, Math.min(S.data.rows.length - 1, i));
+  $$('#dataTable tbody tr').forEach(tr => tr.classList.toggle('cur', +tr.dataset.ri === S.cur));
+  renderPreview(); refreshCurVals(); updateCurInfo();
+}
+function setView(v) {
+  if (S.view === 'edit' && v === 'preview') syncFromEditor();
+  S.view = v;
+  $$('#viewSeg button').forEach(b => b.classList.toggle('on', b.dataset.view === v));
+  const ed = v === 'edit';
+  edFrame.hidden = !ed; pvFrame.hidden = ed;
+  $('#editToolbar').hidden = !ed; $('#previewBar').hidden = ed; $('#pvMeta').hidden = ed;
+  $('#warnings').style.display = ed ? '' : 'none';
+  if (!ed) { showImport(false); renderPvRows(); renderPreview(); }
+}
+function setTab(t) {
+  $$('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === t));
+  ['vars', 'data', 'output', 'audit'].forEach(x => $('#tab-' + x).hidden = x !== t);
+  if (t === 'audit') renderAudit();
+  if (t === 'output') renderOutputSettings();
+}
+function markDirty() { S.dirty = true; updateDirty(); }
+function updateDirty() {
+  $('#dirtyBadge').textContent = S.dirty ? '● 저장 안 됨' : '';
+  document.title = (S.dirty ? '• ' : '') + (S.tpl.name ? S.tpl.name + ' — ' : '') + '메일 양식 변환기';
+}
+
+/* =========================================================
+   Template management
+   ========================================================= */
+async function refreshTplList() {
+  S.templates = (await DB.all('templates')).sort((a, b) => a.name.localeCompare(b.name, 'ko'));
+  renderTplSelect();
+}
+function renderTplSelect() {
+  const sel = $('#tplSelect');
+  const cur = S.saved ? '' : `<option value="">${S.tpl.name ? esc(S.tpl.name) + ' (저장 안 됨)' : '— 새 양식 (저장 안 됨) —'}</option>`;
+  sel.innerHTML = cur + S.templates.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join('');
+  sel.value = S.saved ? S.tpl.id : '';
+}
+async function saveTpl(asNew) {
+  if (S.view === 'edit') syncFromEditor();
+  let name = S.tpl.name;
+  if (asNew || !name) { name = prompt(asNew ? '새 양식 이름' : '양식 이름을 입력하세요', name ? name + (asNew ? ' 사본' : '') : ''); if (!name || !name.trim()) return; name = name.trim(); }
+  if (asNew) S.tpl.id = uid();
+  const dup = S.templates.find(t => t.name === name && t.id !== S.tpl.id);
+  if (dup) { if (!confirm(`"${name}" 양식이 이미 있습니다. 덮어쓸까요?`)) return; S.tpl.id = dup.id; }
+  S.tpl.name = name; S.tpl.updatedAt = Date.now();
+  try { await DB.put('templates', clone(S.tpl)); } catch (e) { toast('저장하지 못했습니다: ' + e.message, true); return; }
+  S.saved = true; S.dirty = false; await refreshTplList(); updateDirty();
+  DB.put('kv', { k: 'lastTpl', id: S.tpl.id }).catch(() => {});
+  toast(DB.ok ? `"${name}" 저장됨` : `"${name}" 저장됨 (이 브라우저는 영구 저장이 안 되어 창을 닫으면 사라집니다. 내보내기로 백업하세요)`, !DB.ok);
+}
+function afterTplLoad() {
+  loadEditor(); if (hasData()) autoMap();
+  renderVars(); renderOutputSettings(); renderPvRows(); renderDataTable();
+  showImport(!S.tpl.body || !S.tpl.body.replace(/<[^>]+>|&nbsp;|\s/g, '') && !/<img/i.test(S.tpl.body));
+  setView('edit'); renderTplSelect(); updateDirty();
+}
+async function openTpl(id) {
+  if (S.dirty && !confirm('저장하지 않은 변경 사항이 있습니다. 버리고 다른 양식을 열까요?')) { renderTplSelect(); return; }
+  const t = await DB.get('templates', id); if (!t) { toast('양식을 찾을 수 없습니다', true); return; }
+  S.tpl = normTpl(clone(t)); S.saved = true; S.dirty = false;
+  afterTplLoad(); DB.put('kv', { k: 'lastTpl', id }).catch(() => {});
+}
+function newTpl() {
+  if (S.dirty && !confirm('저장하지 않은 변경 사항이 있습니다. 버리고 새 양식을 만들까요?')) return;
+  S.tpl = blankTpl(); S.saved = false; S.dirty = false; afterTplLoad(); showImport(true);
+  setTimeout(() => $('#pasteZone').focus(), 50);
+}
+async function deleteTpl() {
+  if (!S.saved) { toast('저장된 양식이 아닙니다'); return; }
+  if (!confirm(`"${S.tpl.name}" 양식을 삭제할까요? 되돌릴 수 없습니다.`)) return;
+  await DB.del('templates', S.tpl.id); S.dirty = false; await refreshTplList();
+  S.tpl = blankTpl(); S.saved = false; afterTplLoad(); toast('삭제했습니다');
+}
+async function renameTpl() {
+  const name = prompt('양식 이름', S.tpl.name); if (!name || !name.trim()) return;
+  if (S.templates.some(t => t.name === name.trim() && t.id !== S.tpl.id)) { toast('같은 이름의 양식이 이미 있습니다', true); return; }
+  S.tpl.name = name.trim();
+  if (S.saved) { const t = await DB.get('templates', S.tpl.id); if (t) { t.name = S.tpl.name; await DB.put('templates', t); } await refreshTplList(); }
+  else renderTplSelect();
+  updateDirty(); toast('이름을 바꿨습니다');
+}
+async function exportAll() {
+  const list = await DB.all('templates');
+  if (S.dirty || !S.saved) { if (S.tpl.body && confirm('현재 양식에 저장하지 않은 변경이 있습니다. 먼저 저장할까요?')) { await saveTpl(false); return exportAll(); } }
+  const all = await DB.all('templates');
+  if (!all.length) { toast('내보낼 저장된 양식이 없습니다', true); return; }
+  const json = JSON.stringify({ app: 'mail-form-converter', version: 1, exportedAt: new Date().toISOString(), templates: all }, null, 1);
+  download(new Blob([json], { type: 'application/json' }), `메일양식_백업_${today()}.json`);
+  toast(`양식 ${all.length}개를 내보냈습니다`);
+  void list;
+}
+async function importJson(file) {
+  try {
+    const j = JSON.parse(decodeText(await file.arrayBuffer()));
+    const arr = Array.isArray(j) ? j : (j.templates || (j.body !== undefined ? [j] : []));
+    if (!arr.length) { toast('가져올 양식이 없습니다', true); return; }
+    const exist = arr.filter(t => S.templates.some(x => x.id === t.id || x.name === t.name));
+    if (exist.length && !confirm(`이름이나 ID가 같은 양식 ${exist.length}개를 덮어씁니다. 계속할까요?`)) return;
+    for (const t of arr) {
+      const n = normTpl(t); const same = S.templates.find(x => x.name === n.name && x.id !== n.id); if (same) n.id = same.id;
+      await DB.put('templates', clone(n));
+    }
+    await refreshTplList(); toast(`양식 ${arr.length}개를 가져왔습니다. 위 목록에서 선택하세요`);
+  } catch (e) { toast('JSON 파일을 읽지 못했습니다: ' + e.message, true); }
+}
+
+/* =========================================================
+   Sample
+   ========================================================= */
+function loadSample() {
+  if (hasTemplateContent() && !confirm('현재 양식을 예시 양식으로 바꿀까요?')) return;
+  const t = blankTpl(); t.name = '예시 - Korean Fair 참가 안내';
+  t.head = 'p{margin:0;font-family:Calibri,"맑은 고딕",sans-serif;font-size:11pt;color:#1f1f1f} a{color:#0563C1}';
+  const ids = { name: uid(), code: uid(), loc: uid(), d1: uid(), d2: uid(), mgr: uid(), guide: uid() };
+  t.body = `<p>Dear <span data-mv="${ids.name}">[Name]</span>,</p><p><br></p>
+<p>We sincerely appreciate your participation in the upcoming OOO Korean Fair.</p><p><br></p>
+<p>Your Code: <b><span data-mv="${ids.code}">[Code]</span></b></p><p><br></p>
+<p><span data-mv="${ids.loc}">[Location]</span>:</p>
+<p><span data-mv="${ids.d1}">[Date 1]</span></p>
+<p><span data-mv="${ids.d2}">[Date 2]</span></p><p><br></p>
+<p><a href="#" data-mv-href="${ids.guide}">Click here</a> to check your guideline.</p><p><br></p>
+<p>Best regards,</p>
+<p><span data-mv="${ids.mgr}">[담당자명]</span></p>`;
+  t.vars = [
+    normVar({ id: ids.name, name: 'Name', col: 'Company' }),
+    normVar({ id: ids.code, name: 'Code', col: 'Code' }),
+    normVar({ id: ids.loc, name: 'Location', col: 'Branch' }),
+    normVar({ id: ids.d1, name: 'Date 1', col: 'Date1', fmt: 'date', dateFmt: 'MMMM D, YYYY (ddd)' }),
+    normVar({ id: ids.d2, name: 'Date 2', col: 'Date2', fmt: 'date', dateFmt: 'MMMM D, YYYY (ddd)', removeEmpty: true }),
+    normVar({ id: ids.mgr, name: '담당자명', useFixed: true, fixed: 'Gildong Hong' }),
+    normVar({ id: ids.guide, name: '가이드 링크', kind: 'link', col: 'Language', map: { on: true, fallback: 'default', def: 'https://example.com/guide/en', rows: [
+      { k: 'EN', v: 'https://example.com/guide/en' }, { k: 'JP', v: 'https://example.com/guide/ja' }, { k: 'CN', v: 'https://example.com/guide/zh' }] } }),
+  ];
+  t.settings = { subject: '[OOO Korean Fair] Participation Confirmation – [Name]', toCol: 'Email', ccCol: '' };
+  S.tpl = t; S.saved = false; S.dirty = true;
+  if (!hasData() || confirm('예시 데이터(3개 회사)도 함께 불러올까요?\n(취소하면 지금 데이터를 유지합니다)')) {
+    setTable([
+      ['Company', 'Code', 'Email', 'Branch', 'Date1', 'Date2', 'Language'],
+      ['Hanbit Trading', 'A-1024', 'contact@hanbit.example', 'Seoul COEX', '2027-03-03', '2027-03-04', 'EN'],
+      ['Blue Ocean Foods', 'B-2048', 'sales@blueocean.example', 'Busan BEXCO', '2027-03-10', '', 'JP'],
+      ['Maple Leaf Co.', 'C-4096', 'hello@mapleleaf.example', 'Seoul COEX', '2027-03-03', '', 'CN'],
+    ], null, '예시 데이터');
+  }
+  afterTplLoad(); markDirty(); setTab('vars');
+  toast('예시 양식을 불러왔습니다. "결과 미리보기"를 눌러 보세요');
+}
+
+/* =========================================================
+   Events
+   ========================================================= */
+function bind() {
+  // top bar
+  $('#tplSelect').addEventListener('change', e => { if (e.target.value) openTpl(e.target.value); });
+  $('#btnNew').onclick = newTpl;
+  $('#btnSave').onclick = () => saveTpl(false);
+  $('#btnSaveAs').onclick = () => saveTpl(true);
+  $('#btnRename').onclick = renameTpl;
+  $('#btnDelete').onclick = deleteTpl;
+  $('#btnExport').onclick = exportAll;
+  $('#btnImport').onclick = () => $('#importFile').click();
+  $('#importFile').onchange = e => { if (e.target.files[0]) importJson(e.target.files[0]); e.target.value = ''; };
+  document.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); saveTpl(false); } });
+  window.addEventListener('beforeunload', e => { if (S.dirty) { e.preventDefault(); e.returnValue = ''; } });
+
+  // view / import
+  $$('#viewSeg button').forEach(b => b.onclick = () => setView(b.dataset.view));
+  $('#btnToggleImport').onclick = () => { const on = $('#importPanel').hidden; showImport(on); if (on) setTimeout(() => $('#pasteZone').focus(), 30); };
+  $('#btnCloseImport').onclick = () => showImport(false);
+  $('#btnOpenFile').onclick = () => $('#tplFile').click();
+  $('#btnOpenFolder').onclick = () => $('#tplFolder').click();
+  $('#tplFile').onchange = e => { importFiles(e.target.files); e.target.value = ''; };
+  $('#tplFolder').onchange = e => { importFiles(e.target.files); e.target.value = ''; };
+  $('#btnSample').onclick = loadSample;
+  const pz = $('#pasteZone');
+  pz.addEventListener('paste', async e => {
+    e.preventDefault(); const cd = e.clipboardData;
+    const html = cd.getData('text/html'); const imgFiles = [...cd.files].filter(f => f.type.startsWith('image/'));
+    const clipImgs = await Promise.all(imgFiles.map(readDataURL));
+    if (html) applyImport(html, { clipImgs });
+    else if (clipImgs.length) applyImport(clipImgs.map(u => `<p><img src="${u}"></p>`).join(''));
+    else { const t = cd.getData('text/plain'); if (t) applyImport(textToHtml(t)); }
+    pz.innerHTML = '';
+  });
+  pz.addEventListener('input', () => { pz.innerHTML = ''; });
+  pz.addEventListener('dragover', e => { e.preventDefault(); pz.classList.add('drag'); });
+  pz.addEventListener('dragleave', () => pz.classList.remove('drag'));
+  pz.addEventListener('drop', e => { e.preventDefault(); pz.classList.remove('drag'); importFiles(e.dataTransfer.files); });
+
+  // editor toolbar
+  $$('#editToolbar button').forEach(b => b.addEventListener('mousedown', e => e.preventDefault()));
+  $('#editToolbar').addEventListener('click', e => {
+    const b = e.target.closest('button[data-cmd]'); if (!b) return; const c = b.dataset.cmd;
+    if (c === 'mkvar') selectionToVar('text');
+    else if (c === 'mklink') selectionToVar('link');
+    else if (c === 'detect') autoDetect(false);
+    else if (c === 'link') { const u = prompt('링크 주소 (https://…)'); if (u) execCmd('createLink', safeHref(u)); }
+    else if (c === 'image') { S.imgMode = 'insert'; $('#imgFile').click(); }
+    else if (c === 'clearHilite') clearHighlight();
+    else if (c === 'replaceImg') { if (S.selImg) { S.imgMode = 'replace'; $('#imgFile').click(); } }
+    else execCmd(c);
+  });
+  $('#foreColor').addEventListener('input', e => execCmd('foreColor', e.target.value));
+  $('#hiliteColor').addEventListener('input', applyHilite);
+  $('#hiliteAlpha').addEventListener('input', e => { $('#hiliteAlphaLbl').textContent = e.target.value + '%'; });
+  $('#hiliteAlpha').addEventListener('change', () => { if (S.lastRange && !S.lastRange.collapsed) applyHilite(); });
+  $('#markAlpha').addEventListener('input', applyMarkAlpha);
+  try { const ma = localStorage.getItem('mfc.markAlpha'); if (ma !== null) $('#markAlpha').value = ma; } catch (e) {}
+  $('#fontSize').addEventListener('change', e => { if (e.target.value) applyFontSize(e.target.value); e.target.value = ''; });
+  $('#imgFile').onchange = async e => {
+    const f = e.target.files[0]; e.target.value = ''; if (!f) return; const url = await readDataURL(f);
+    if (S.imgMode === 'replace' && S.selImg) { S.selImg.setAttribute('src', url); S.selImg.removeAttribute('srcset'); onEditorInput(); checkWarnings(); toast('이미지를 교체했습니다'); }
+    else execCmd('insertImage', url);
+  };
+
+  // tabs
+  $$('#tabs button').forEach(b => b.onclick = () => setTab(b.dataset.tab));
+
+  // variable cards
+  const vl = $('#varList');
+  const getVar = el => { const c = el.closest('.var'); return c && S.tpl.vars.find(v => v.id === c.dataset.id); };
+  vl.addEventListener('input', e => {
+    const f = e.target.dataset.f; const v = getVar(e.target); if (!f || !v) return;
+    const val = e.target.value; let structural = false;
+    switch (f) {
+      case 'name': {
+        const old = v.name; v.name = val;
+        const d = edDoc(); $$(`[data-mv="${v.id}"]`, d).forEach(s => { if (s.textContent === `[${old}]`) s.textContent = `[${val}]`; }); syncFromEditor(); break;
+      }
+      case 'fixed': v.srcs[+e.target.dataset.si].fixed = val; break;
+      case 'joinerCustom': v.joiner = val; break;
+      case 'dateFmt': v.dateFmt = val; break;
+      case 'formula': v.formula = val; break;
+      case 'mk': v.map.rows[+e.target.dataset.i].k = val; break;
+      case 'mv': v.map.rows[+e.target.dataset.i].v = val; break;
+      case 'mapDef': v.map.def = val; break;
+      case 'st_size': v.style.size = val; break;
+      case 'st_color': v.style.color = val; { const cb = $('[data-f="st_colorOn"]', e.target.closest('.var')); if (cb) cb.checked = true; } break;
+      default: return;
+    }
+    markDirty(); refreshPreviewIfShown(); if (structural) renderVars();
+  });
+  vl.addEventListener('change', e => {
+    const f = e.target.dataset.f; const v = getVar(e.target); if (!f || !v) return;
+    const t = e.target; let structural = false;
+    switch (f) {
+      case 'src': { const s = v.srcs[+t.dataset.si]; if (t.value === '__fixed') s.useFixed = true; else { s.useFixed = false; s.col = t.value; } structural = true; break; }
+      case 'joiner': if (t.value === '__custom') { t.insertAdjacentHTML('afterend', `<input data-f="joinerCustom" value="" placeholder="구분 글자">`); t.nextElementSibling.focus(); return; } v.joiner = t.value; break;
+      case 'fmt': v.fmt = t.value; structural = true; break;
+      case 'datePreset': if (t.value === '__custom') { const inp = $('[data-f="dateFmt"]', t.closest('.var')); inp.hidden = false; inp.focus(); return; } v.dateFmt = t.value; structural = true; break;
+      case 'removeEmpty': v.removeEmpty = t.checked; break;
+      case 'fxPreset': {
+        if (t.value === '') return; const pf = FX_PRESETS[+t.value][1];
+        if (String(v.formula || '').trim() && v.formula.trim() !== pf && !confirm('지금 수식을 이 수식으로 바꿀까요?')) { t.value = ''; return; }
+        v.formula = pf; structural = true; break;
+      }
+      case 'mapOn': v.map.on = t.checked; structural = true; break;
+      case 'mapFb': v.map.fallback = t.value; structural = true; break;
+      case 'st_b': case 'st_i': case 'st_u': v.style[f.slice(3)] = t.value; structural = true; break;
+      case 'st_colorOn': v.style.color = t.checked ? ($('[data-f="st_color"]', t.closest('.var')).value) : ''; structural = true; break;
+      case 'st_size': v.style.size = t.value; structural = true; break;
+      default: return;
+    }
+    markDirty(); if (structural) renderVars(); refreshPreviewIfShown(); renderDataTable();
+  });
+  vl.addEventListener('click', e => {
+    const b = e.target.closest('button[data-act]'); if (!b) return; const v = getVar(b); if (!v) return;
+    const a = b.dataset.act;
+    if (a === 'del') deleteVar(v.id);
+    else if (a === 'locate') locateVar(v.id);
+    else if (a === 'srcadd') { v.srcs.push({ col: '', useFixed: false, fixed: '' }); markDirty(); renderVars(); refreshPreviewIfShown(); }
+    else if (a === 'srcdel') { v.srcs.splice(+b.dataset.si, 1); if (!v.srcs.length) v.srcs.push({ col: '', useFixed: false, fixed: '' }); markDirty(); renderVars(); refreshPreviewIfShown(); renderDataTable(); }
+    else if (a === 'mapadd') { v.map.rows.push({ k: '', v: '' }); v.map.on = true; markDirty(); renderVars(); const ins = $$(`.var[data-id="${v.id}"] [data-f="mk"]`); if (ins.length) ins[ins.length - 1].focus(); }
+    else if (a === 'mapdel') { v.map.rows.splice(+b.dataset.i, 1); markDirty(); renderVars(); refreshPreviewIfShown(); }
+    else if (a === 'mappaste') {
+      const txt = prompt('엑셀에서 두 열(원래 값 | 바꿀 값)을 복사해 아래 칸에 붙여넣으세요.\n(여러 줄도 한 번에 들어갑니다)');
+      if (!txt) return;
+      const rows = txt.includes('\t') ? parseDelimited(txt, '\t') : txt.split(/\s{2,}|\n/).map(l => l.split(/\s+/));
+      let n = 0; rows.forEach(r => { if (r.length >= 2 && String(r[0]).trim()) { v.map.rows.push({ k: String(r[0]).trim(), v: String(r[1]).trim() }); n++; } });
+      v.map.on = true; markDirty(); renderVars(); refreshPreviewIfShown(); toast(`변환표에 ${n}행을 추가했습니다`);
+    }
+  });
+
+  // data
+  $('#btnDataFile').onclick = () => $('#dataFile').click();
+  $('#dataFile').onchange = e => { if (e.target.files[0]) loadDataFile(e.target.files[0]); e.target.value = ''; };
+  $('#sheetSel').onchange = e => loadSheet(e.target.value);
+  $('#btnDataClear').onclick = () => {
+    if (!hasData() || !confirm('불러온 데이터를 지울까요? (양식과 변수 설정은 그대로입니다)')) return;
+    S.data = { headers: [], rows: [], raws: [], name: '' }; S.done = {}; S.sel = new Set(); S.ok = new Set(); S.dataVer++; S.cur = 0; $('#sheetSel').hidden = true;
+    renderAllData(); renderVars(); saveDataLater(); refreshPreviewIfShown();
+  };
+  $('#dataPaste').addEventListener('paste', e => {
+    const t = e.clipboardData.getData('text/plain'); if (!t) return; e.preventDefault();
+    if (hasData() && !confirm('지금 데이터를 붙여넣은 데이터로 바꿀까요?')) return;
+    setTable(parseDelimited(t, t.includes('\t') ? '\t' : null), null, '붙여넣은 데이터'); e.target.value = '';
+  });
+  const dt = $('#dataTable');
+  dt.addEventListener('click', e => {
+    if (e.target.id === 'selAll') { S.sel = e.target.checked ? new Set(S.data.rows.map((_, i) => i)) : new Set(); renderDataTable(); updateCurInfo(); saveDataLater(); return; }
+    if (e.target.dataset.sel !== undefined) { const i = +e.target.dataset.sel; e.target.checked ? S.sel.add(i) : S.sel.delete(i); updateCurInfo(); $('#selAll').checked = S.sel.size === S.data.rows.length; saveDataLater(); return; }
+    const tr = e.target.closest('tr[data-ri]'); if (!tr) return; const ri = +tr.dataset.ri;
+    if (e.target.closest('button[data-act="copy"]')) { S.cur = ri; setCur(ri); copyRow(ri); return; }
+    setCur(ri); setView('preview');
+  });
+
+  // preview bar
+  $('#pvRow').onchange = e => setCur(+e.target.value);
+  $('#pvPrev').onclick = () => setCur(S.cur - 1);
+  $('#pvNext').onclick = () => setCur(S.cur + 1);
+  $('#pvCopy').onclick = () => copyRow(S.cur);
+  $('#pvCopySubject').onclick = () => copySubject(S.cur);
+  $('#pvCopyNext').onclick = () => { if (copyRow(S.cur) && hasData() && S.cur < S.data.rows.length - 1) setCur(S.cur + 1); };
+
+  // audit
+  $('#auditFilter').onchange = renderAudit;
+  $('#auditHideOk').onchange = renderAudit;
+  $('#auditSelectClean').onclick = () => {
+    if (!hasData()) return;
+    S.sel = new Set(S.data.rows.map((_, i) => i).filter(ri => { const a = rowAudit(ri); return !a.e || a.ok; }));
+    saveDataLater(); renderDataTable(); updateCurInfo();
+    toast(`오류 없는 행 ${S.sel.size}건을 선택했습니다 (② 데이터 탭 체크박스)`);
+  };
+  $('#auditList').addEventListener('click', e => {
+    const row = e.target.closest('.arow'); if (!row) return; const ri = +row.dataset.ri;
+    const b = e.target.closest('[data-act]'); if (!b) return;
+    if (b.dataset.act === 'ok') { e.stopPropagation(); S.ok.has(ri) ? S.ok.delete(ri) : S.ok.add(ri); saveDataLater(); renderAudit(); renderDataTable(); renderPreview(); return; }
+    if (b.dataset.act === 'go') { setCur(ri); setView('preview'); }
+  });
+
+  // output
+  $('#toCol').onchange = e => { S.tpl.settings.toCol = e.target.value; markDirty(); refreshPreviewIfShown(); };
+  $('#ccCol').onchange = e => { S.tpl.settings.ccCol = e.target.value; markDirty(); };
+  $('#subject').addEventListener('input', e => { S.tpl.settings.subject = e.target.value; markDirty(); updateCurInfo(); refreshPreviewIfShown(); });
+  $('#outCopy').onclick = () => copyRow(S.cur);
+  $('#outCopySubject').onclick = () => copySubject(S.cur);
+  $('#outCopyHtml').onclick = () => { const o = buildOutput(S.cur); if (copyPlain(o.html)) toast('HTML 소스를 복사했습니다'); };
+  $('#outEml').onclick = () => saveEml(S.cur);
+  $('#outZip').onclick = saveZip;
+}
+
+/* =========================================================
+   Init
+   ========================================================= */
+(async function init() {
+  bind();
+  const ok = await DB.open();
+  if (!ok) toast('이 브라우저에서는 영구 저장소를 쓸 수 없어 창을 닫으면 양식이 사라집니다. 내보내기로 백업하세요.', true);
+  await refreshTplList();
+  try {
+    const ld = await DB.get('kv', 'lastData');
+    if (ld && ld.rows && ld.rows.length) {
+      S.data = { headers: ld.headers, rows: ld.rows, raws: ld.raws || ld.rows, name: ld.name };
+      S.done = ld.done || {}; S.sel = new Set(ld.sel || ld.rows.map((_, i) => i)); S.ok = new Set(ld.ok || []); S.dataVer++;
+    }
+    const lt = await DB.get('kv', 'lastTpl');
+    const t = lt && S.templates.find(x => x.id === lt.id);
+    if (t) { S.tpl = normTpl(clone(t)); S.saved = true; }
+  } catch (e) {}
+  afterTplLoad(); renderAllData(); renderVars();
+})();
+</script>
+</body>
+</html>
